@@ -37,6 +37,164 @@ const PRESET_PERIODS = [
   { id: 'all', name: '全部', icon: '📋' },
 ];
 
+// 新建任务时的截止日期快捷选项（包含工作日选项）
+const DEADLINE_PRESETS = [
+  { id: 'preset-week', name: '本周', icon: '📅' },
+  { id: 'deadline-next-week', name: '下周', icon: '📅' },
+  { id: 'deadline-week-wd', name: '本周(工作日)', icon: '💼' },
+  { id: 'deadline-next-week-wd', name: '下周(工作日)', icon: '💼' },
+  { id: 'preset-month', name: '本月', icon: '📆' },
+  { id: 'deadline-month-wd', name: '本月(工作日)', icon: '💼' },
+  { id: 'preset-quarter', name: '本季度', icon: '🗓️' },
+  { id: 'preset-year', name: '本年', icon: '📊' },
+];
+const WORKDAY_IDS = new Set(['deadline-week-wd', 'deadline-next-week-wd', 'deadline-month-wd']);
+
+// 2026年法定节假日放假日期
+const HOLIDAYS_2026 = new Set([
+  // 元旦 1月1日-3日
+  '2026-01-01', '2026-01-02', '2026-01-03',
+  // 春节 2月15日-23日
+  '2026-02-15', '2026-02-16', '2026-02-17', '2026-02-18',
+  '2026-02-19', '2026-02-20', '2026-02-21', '2026-02-22', '2026-02-23',
+  // 清明节 4月4日-6日
+  '2026-04-04', '2026-04-05', '2026-04-06',
+  // 劳动节 5月1日-5日
+  '2026-05-01', '2026-05-02', '2026-05-03', '2026-05-04', '2026-05-05',
+  // 端午节 6月19日-21日
+  '2026-06-19', '2026-06-20', '2026-06-21',
+  // 中秋节 9月25日-27日
+  '2026-09-25', '2026-09-26', '2026-09-27',
+  // 国庆节 10月1日-7日
+  '2026-10-01', '2026-10-02', '2026-10-03', '2026-10-04',
+  '2026-10-05', '2026-10-06', '2026-10-07',
+]);
+// 2026年调休上班日（周末补班）
+const WORKDAY_OVERRIDES_2026 = new Set([
+  '2026-01-04',  // 元旦调休
+  '2026-02-14', '2026-02-28',  // 春节调休
+  '2026-05-09',  // 劳动节调休
+  '2026-09-20', '2026-10-10',  // 国庆调休
+]);
+
+function isHoliday(d) {
+  const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return HOLIDAYS_2026.has(key);
+}
+function isWorkdayDate(d) {
+  const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  if (WORKDAY_OVERRIDES_2026.has(key)) return true;  // 调休补班
+  const day = d.getDay();
+  if (day === 0 || day === 6) return false;  // 周末
+  return !isHoliday(d);  // 非节假日
+}
+function findLastWorkday(endDate, startDate) {
+  const d = new Date(endDate);
+  while (d >= startDate) {
+    if (isWorkdayDate(d)) return new Date(d);
+    d.setDate(d.getDate() - 1);
+  }
+  return new Date(endDate);
+}
+
+// 计算截止日期快捷选项对应的结束日期
+function getDeadlineEndDate(presetId) {
+  const now = new Date();
+
+  switch (presetId) {
+    case 'preset-week': {
+      const day = now.getDay();
+      const diff = day === 0 ? -6 : 1 - day;
+      const monday = new Date(now);
+      monday.setDate(now.getDate() + diff);
+      const sunday = new Date(monday);
+      sunday.setDate(monday.getDate() + 6);
+      sunday.setHours(10, 0, 0, 0);
+      return sunday;
+    }
+    case 'deadline-week-wd': {
+      const day = now.getDay();
+      const diff = day === 0 ? -6 : 1 - day;
+      const monday = new Date(now);
+      monday.setDate(now.getDate() + diff);
+      const friday = new Date(monday);
+      friday.setDate(monday.getDate() + 4);
+      const wd = findLastWorkday(friday, monday);
+      wd.setHours(10, 0, 0, 0);
+      return wd;
+    }
+    case 'deadline-next-week-wd': {
+      const day = now.getDay();
+      const diff = day === 0 ? -6 : 1 - day;
+      const nextMonday = new Date(now);
+      nextMonday.setDate(now.getDate() + diff + 7);
+      const nextFriday = new Date(nextMonday);
+      nextFriday.setDate(nextMonday.getDate() + 4);
+      const wd = findLastWorkday(nextFriday, nextMonday);
+      wd.setHours(10, 0, 0, 0);
+      return wd;
+    }
+    case 'deadline-next-week': {
+      const day = now.getDay();
+      const diff = day === 0 ? -6 : 1 - day;
+      const nextMonday = new Date(now);
+      nextMonday.setDate(now.getDate() + diff + 7);
+      const nextSunday = new Date(nextMonday);
+      nextSunday.setDate(nextMonday.getDate() + 6);
+      nextSunday.setHours(10, 0, 0, 0);
+      return nextSunday;
+    }
+    case 'preset-month': {
+      const end = new Date(now);
+      end.setMonth(end.getMonth() + 1);
+      end.setDate(0);
+      end.setHours(10, 0, 0, 0);
+      return end;
+    }
+    case 'deadline-month-wd': {
+      const monthEnd = new Date(now);
+      monthEnd.setMonth(monthEnd.getMonth() + 1);
+      monthEnd.setDate(0);
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      const wd = findLastWorkday(monthEnd, monthStart);
+      wd.setHours(10, 0, 0, 0);
+      return wd;
+    }
+    case 'preset-quarter': {
+      const qm = Math.floor(now.getMonth() / 3) * 3;
+      const end = new Date(now);
+      end.setMonth(qm + 3);
+      end.setDate(0);
+      end.setHours(10, 0, 0, 0);
+      return end;
+    }
+    case 'preset-year': {
+      const end = new Date(now);
+      end.setMonth(11);
+      end.setDate(31);
+      end.setHours(10, 0, 0, 0);
+      return end;
+    }
+    default:
+      return null;
+  }
+}
+
+// 将截止日期快捷选项映射到列表分类ID
+function mapDeadlineToPeriod(deadlinePresetId) {
+  switch (deadlinePresetId) {
+    case 'deadline-next-week':
+    case 'deadline-next-week-wd':
+      return 'preset-week';
+    case 'deadline-week-wd':
+      return 'preset-week';
+    case 'deadline-month-wd':
+      return 'preset-month';
+    default:
+      return deadlinePresetId;
+  }
+}
+
 function isPresetPeriod(id) {
   return PRESET_PERIODS.some((p) => p.id === id);
 }
@@ -91,7 +249,9 @@ function getPresetDateRange(presetId) {
 
 function getPeriodLabel(periodId) {
   const preset = PRESET_PERIODS.find((p) => p.id === periodId);
-  return preset ? preset.name : '未归类';
+  if (preset) return preset.name;
+  const dl = DEADLINE_PRESETS.find((p) => p.id === periodId);
+  return dl ? dl.name : '未归类';
 }
 
 // 计算某时段内的未完成任务数
@@ -122,7 +282,7 @@ function getDefaultPeriodId() {
 
 const DEFAULT_TAGS = [
   { id: 'work', name: '工作', builtin: true },
-  { id: 'personal', name: '个人', builtin: true },
+  { id: 'life', name: '生活', builtin: true },
   { id: 'study', name: '学习', builtin: true },
   { id: 'health', name: '健康', builtin: true },
   { id: 'other', name: '其他', builtin: true },
@@ -241,6 +401,8 @@ const state = {
   reviewMode: false,
   reviewSortBy: 'overdue',   // overdue | priority | deadline | updated
   reviewDoneFirst: false,    // 已完成是否放顶部
+  reviewCollapsed: new Set(),  // 已收起的任务ID
+  reviewTouched: new Set(),   // 本次复盘中被操作过的任务ID
   currentTagFilter: 'all',   // 当前标签筛选，all 表示不限
   deferredPrompt: null,
 };
@@ -347,7 +509,10 @@ function showModal(html, center = false) {
   overlay.className = `modal-overlay${center ? ' center' : ''}`;
   overlay.innerHTML = html;
   overlay.addEventListener('click', (e) => {
-    if (e.target === overlay) closeModal();
+    if (e.target === overlay) {
+      if (overlay.onCloseAttempt) overlay.onCloseAttempt();
+      else closeModal();
+    }
   });
   document.body.appendChild(overlay);
   currentModal = overlay;
@@ -397,8 +562,15 @@ function showAddTaskModal(presetPeriodId) {
         </div>
 
         <div class="form-group">
+          <label class="form-label">标签</label>
+          <div class="tag-chips" id="add-tag-chips">
+            ${tagChips}
+          </div>
+        </div>
+
+        <div class="form-group">
           <label class="form-label">优先级</label>
-          <div class="priority-options" id="add-priority-options">
+          <div class="priority-options add-priority-compact" id="add-priority-options">
             ${priorityOptions}
           </div>
         </div>
@@ -427,13 +599,6 @@ function showAddTaskModal(presetPeriodId) {
         </div>
 
         <div class="form-group">
-          <label class="form-label">标签</label>
-          <div class="tag-chips" id="add-tag-chips">
-            ${tagChips}
-          </div>
-        </div>
-
-        <div class="form-group">
           <label class="form-label">备注 <span style="font-weight:400;color:var(--color-text-hint);">（选填）</span></label>
           <textarea class="form-textarea" id="add-task-notes" placeholder="补充说明、关键信息、相关链接..." rows="2"></textarea>
         </div>
@@ -449,13 +614,23 @@ function showAddTaskModal(presetPeriodId) {
   let usingPeriod = 'preset-week'; // 当前选中的预估时段
   let isManual = false; // 是否手动指定日期
 
-  // 预估时段（不含"全部"，因为"全部"没有截止日期）
-  const timePresets = PRESET_PERIODS.filter((p) => p.id !== 'all');
+  // 根据是否选中“工作”标签，决定快捷选项排序
+  function getSortedPresets() {
+    if (selectedTags.includes('work')) {
+      return [...DEADLINE_PRESETS].sort((a, b) => {
+        const aw = WORKDAY_IDS.has(a.id) ? 0 : 1;
+        const bw = WORKDAY_IDS.has(b.id) ? 0 : 1;
+        return aw - bw;
+      });
+    }
+    return DEADLINE_PRESETS;
+  }
 
   // 渲染时段选择芯片
   const chipsContainer = overlay.querySelector('#add-period-chips');
   function renderPeriodChips() {
-    chipsContainer.innerHTML = timePresets
+    const presets = getSortedPresets();
+    chipsContainer.innerHTML = presets
       .map(
         (p) =>
           `<span class="period-chip${p.id === usingPeriod ? ' active' : ''}" data-period="${p.id}">${p.icon} ${p.name}</span>`
@@ -472,13 +647,12 @@ function showAddTaskModal(presetPeriodId) {
 
   // 根据时段自动计算截止日期
   function updateAutoDeadline() {
-    const range = getPresetDateRange(usingPeriod);
+    const endDate = getDeadlineEndDate(usingPeriod);
     const hint = overlay.querySelector('#add-deadline-hint');
-    if (range) {
-      const end = new Date(range.end);
-      const dateStr = toDateString(range.end);
+    if (endDate) {
+      const dateStr = toDateString(endDate);
       overlay.querySelector('#add-task-date').value = dateStr;
-      hint.textContent = `👉 自动设为 ${formatDate(range.end)}（${end.getHours()}:00）`;
+      hint.textContent = `👉 自动设为 ${formatDate(endDate)}（10:00）`;
     } else {
       overlay.querySelector('#add-task-date').value = '';
       hint.textContent = '';
@@ -507,6 +681,7 @@ function showAddTaskModal(presetPeriodId) {
   // 初始化
   renderPeriodChips();
   updateAutoDeadline();
+  overlay.querySelector('#add-task-name').focus();
 
   // 优先级选择
   overlay.querySelectorAll('.priority-option').forEach((el) => {
@@ -518,7 +693,7 @@ function showAddTaskModal(presetPeriodId) {
   });
 
   // 标签选择
-  overlay.querySelectorAll('.tag-chip').forEach((el) => {
+  overlay.querySelectorAll('#add-tag-chips .tag-chip').forEach((el) => {
     el.addEventListener('click', () => {
       el.classList.toggle('selected');
       const tagId = el.dataset.tag;
@@ -527,6 +702,11 @@ function showAddTaskModal(presetPeriodId) {
       } else {
         selectedTags = selectedTags.filter((t) => t !== tagId);
       }
+      // 工作标签与预计完成时间快捷选项联动
+      const newPresets = getSortedPresets();
+      usingPeriod = newPresets[0].id;
+      renderPeriodChips();
+      updateAutoDeadline();
     });
   });
 
@@ -562,7 +742,7 @@ function showAddTaskModal(presetPeriodId) {
       priority: selectedPriority,
       deadline,
       tags: selectedTags,
-      periodId: usingPeriod,
+      periodId: mapDeadlineToPeriod(usingPeriod),
       status: 'todo',
       progressLog: overlay.querySelector('#add-task-notes').value.trim()
         ? [{ content: overlay.querySelector('#add-task-notes').value.trim(), timestamp: Date.now() }]
@@ -623,12 +803,15 @@ async function showEditTaskModal(task) {
   if (logEntries.length > 0) {
     progressTimelineHtml = `
       <div class="progress-timeline">
-        ${logEntries.map((entry) => `
-          <div class="progress-timeline-item">
+        ${logEntries.map((entry, idx) => `
+          <div class="progress-timeline-item" data-log-ts="${entry.timestamp}">
             <div class="progress-timeline-dot"></div>
             <div class="progress-timeline-content">
-              <div class="progress-timeline-text">${escapeHtml(entry.content)}</div>
-              <div class="progress-timeline-time">${formatDateTime(entry.timestamp)}</div>
+              <div>
+                <div class="progress-timeline-text">${escapeHtml(entry.content)}</div>
+                <div class="progress-timeline-time">${formatDateTime(entry.timestamp)}</div>
+              </div>
+              <button class="progress-delete-btn" data-log-ts="${entry.timestamp}">删除</button>
             </div>
           </div>
         `).join('')}
@@ -640,7 +823,7 @@ async function showEditTaskModal(task) {
       <div class="modal-handle"></div>
       <div class="modal-header">
         <span class="modal-title">编辑任务</span>
-        <button class="modal-close" onclick="closeModal()">✕</button>
+        <button class="modal-close" id="edit-modal-close">✕</button>
       </div>
       <div class="modal-body">
         <div class="form-group">
@@ -657,7 +840,7 @@ async function showEditTaskModal(task) {
 
         <div class="form-group">
           <label class="form-label">优先级</label>
-          <div class="priority-options" id="edit-priority-options">
+          <div class="priority-options add-priority-compact" id="edit-priority-options">
             ${priorityOptions}
           </div>
         </div>
@@ -686,7 +869,7 @@ async function showEditTaskModal(task) {
           <label class="form-label">📝 进展记录</label>
           <div style="display:flex;gap:6px;margin-bottom:12px;">
             <input class="form-input" id="edit-new-progress" placeholder="添加新的进展..." style="flex:1;">
-            <button class="btn btn-primary" id="btn-add-progress" style="flex-shrink:0;padding:5px 10px;font-size:12px;">记录</button>
+            <button class="btn btn-primary" id="btn-add-progress" style="display:none;flex-shrink:0;padding:5px 10px;font-size:12px;">保存</button>
           </div>
           ${progressTimelineHtml}
         </div>
@@ -702,6 +885,81 @@ async function showEditTaskModal(task) {
   let editPriority = task.priority;
   let editStatus = task.status;
   let editTags = [...(task.tags || [])];
+
+  // 初始状态快照（用于检测未保存的改动，不含进展记录）
+  const initialState = {
+    name: task.name,
+    priority: task.priority,
+    status: task.status,
+    tags: [...(task.tags || [])].sort().join(','),
+    deadline: task.deadline || null,
+  };
+
+  // 拦截关闭（点击背景或✕按钮）
+  overlay.onCloseAttempt = tryCloseEditModal;
+  overlay.querySelector('#edit-modal-close').addEventListener('click', tryCloseEditModal);
+
+  function hasUnsavedChanges() {
+    if (overlay.querySelector('#edit-task-name').value.trim() !== initialState.name) return true;
+    if (editPriority !== initialState.priority) return true;
+    if (editStatus !== initialState.status) return true;
+    const currentTags = [...editTags].sort().join(',');
+    if (currentTags !== initialState.tags) return true;
+    const dateStr = overlay.querySelector('#edit-task-date')?.value;
+    let currentDeadline = null;
+    if (dateStr) {
+      const h = parseInt(overlay.querySelector('#edit-task-hour')?.value) || 18;
+      const m = parseInt(overlay.querySelector('#edit-task-minute')?.value) || 0;
+      currentDeadline = new Date(dateStr + 'T00:00:00').getTime() + h * 3600000 + m * 60000;
+    }
+    if (currentDeadline !== initialState.deadline) return true;
+    return false;
+  }
+
+  function tryCloseEditModal() {
+    if (!hasUnsavedChanges()) {
+      closeModal();
+      return;
+    }
+    // 隐藏编辑弹窗，显示未保存确认框
+    overlay.style.display = 'none';
+    currentModal = null;
+    showUnsavedChangesDialog(
+      '有未保存的修改',
+      '是否保存当前修改后再退出？',
+      async () => { await saveAndClose(); },
+      () => { closeModal(); },
+      () => {
+        // 取消：恢复编辑弹窗
+        overlay.style.display = '';
+        currentModal = overlay;
+        $('#app-content').style.overflow = 'hidden';
+      }
+    );
+  }
+
+  async function saveAndClose() {
+    const name = overlay.querySelector('#edit-task-name').value.trim();
+    if (!name) { showToast('任务名称不能为空', 'error'); return; }
+    const dateStr = overlay.querySelector('#edit-task-date').value;
+    let deadline = null;
+    if (dateStr) {
+      const h = parseInt(overlay.querySelector('#edit-task-hour').value) || 18;
+      const m = parseInt(overlay.querySelector('#edit-task-minute').value) || 0;
+      deadline = new Date(dateStr + 'T00:00:00').getTime() + h * 3600000 + m * 60000;
+    }
+    task.name = name;
+    task.priority = editPriority;
+    task.deadline = deadline;
+    task.tags = editTags;
+    task.status = editStatus;
+    task.updatedAt = Date.now();
+    await dbPut('tasks', task);
+    closeModal();
+    showToast('任务已更新 ✓', 'success');
+    await loadData();
+    renderCurrentView();
+  }
 
   overlay.querySelectorAll('#edit-priority-options .priority-option').forEach((el) => {
     el.addEventListener('click', () => {
@@ -736,28 +994,78 @@ async function showEditTaskModal(task) {
     overlay.querySelector('#edit-time-row').style.display = 'flex';
   });
 
+  // 进展记录删除按钮
+  overlay.querySelectorAll('.progress-delete-btn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (!btn.classList.contains('confirm')) {
+        // 第一次点击：变为确认删除
+        btn.textContent = '确认删除';
+        btn.classList.add('confirm');
+        return;
+      }
+      // 第二次点击：执行删除
+      const ts = parseInt(btn.dataset.logTs);
+      task.progressLog = (task.progressLog || []).filter((e) => e.timestamp !== ts);
+      await dbPut('tasks', task);
+      btn.closest('.progress-timeline-item').remove();
+      // 如果时间轴为空，移除整个容器
+      const timeline = overlay.querySelector('.progress-timeline');
+      if (timeline && timeline.children.length === 0) timeline.remove();
+      showToast('进展已删除', 'success');
+    });
+  });
+
+  // 输入内容时显示/隐藏保存按钮
+  const progressInput = overlay.querySelector('#edit-new-progress');
+  const addProgressBtn = overlay.querySelector('#btn-add-progress');
+  if (progressInput && addProgressBtn) {
+    progressInput.addEventListener('input', () => {
+      addProgressBtn.style.display = progressInput.value.trim() ? 'inline-block' : 'none';
+    });
+  }
+
   // 添加新进展（直接更新界面，不关弹窗）
-  overlay.querySelector('#btn-add-progress')?.addEventListener('click', async () => {
+  addProgressBtn?.addEventListener('click', async () => {
     const inputEl = overlay.querySelector('#edit-new-progress');
     const content = inputEl.value.trim();
     if (!content) { showToast('请输入进展内容', 'error'); return; }
     appendProgress(task, content);
     await dbPut('tasks', task);
     inputEl.value = '';
+    addProgressBtn.style.display = 'none';
+    const newTs = Date.now();
     // 直接在当前弹窗的时间轴顶部插入新条目
     const timeline = overlay.querySelector('.progress-timeline');
     const newEntry = document.createElement('div');
     newEntry.className = 'progress-timeline-item';
+    newEntry.dataset.logTs = newTs;
     newEntry.innerHTML = `
       <div class="progress-timeline-dot"></div>
       <div class="progress-timeline-content">
-        <div class="progress-timeline-text">${escapeHtml(content)}</div>
-        <div class="progress-timeline-time">${formatDateTime(Date.now())}</div>
+        <div>
+          <div class="progress-timeline-text">${escapeHtml(content)}</div>
+          <div class="progress-timeline-time">${formatDateTime(newTs)}</div>
+        </div>
+        <button class="progress-delete-btn" data-log-ts="${newTs}">删除</button>
       </div>`;
+    // 绑定新条目的删除事件
+    const newDelBtn = newEntry.querySelector('.progress-delete-btn');
+    newDelBtn.addEventListener('click', async () => {
+      if (!newDelBtn.classList.contains('confirm')) {
+        newDelBtn.textContent = '确认删除';
+        newDelBtn.classList.add('confirm');
+        return;
+      }
+      task.progressLog = (task.progressLog || []).filter((e) => e.timestamp !== newTs);
+      await dbPut('tasks', task);
+      newEntry.remove();
+      const tl = overlay.querySelector('.progress-timeline');
+      if (tl && tl.children.length === 0) tl.remove();
+      showToast('进展已删除', 'success');
+    });
     if (timeline) {
       timeline.insertBefore(newEntry, timeline.firstChild);
     } else {
-      // 首次添加，创建时间轴容器
       const container = document.createElement('div');
       container.className = 'progress-timeline';
       container.appendChild(newEntry);
@@ -794,7 +1102,9 @@ async function showEditTaskModal(task) {
   });
 
   overlay.querySelector('#btn-delete-task').addEventListener('click', async () => {
-    closeModal();
+    // 隐藏编辑弹窗（不销毁），取消时可恢复
+    overlay.style.display = 'none';
+    currentModal = null; // 断开关联，避免 showModal 内部 closeModal 将其移除
     showConfirmDialog(
       '确定要删除这个任务吗？',
       '删除后无法恢复',
@@ -803,6 +1113,12 @@ async function showEditTaskModal(task) {
         showToast('任务已删除', 'success');
         await loadData();
         renderCurrentView();
+      },
+      () => {
+        // 取消删除：恢复编辑弹窗
+        overlay.style.display = '';
+        currentModal = overlay;
+        $('#app-content').style.overflow = 'hidden';
       }
     );
   });
@@ -810,7 +1126,7 @@ async function showEditTaskModal(task) {
 
 // ============ 确认对话框 ============
 
-function showConfirmDialog(title, desc, onConfirm) {
+function showConfirmDialog(title, desc, onConfirm, onCancel) {
   const html = `
     <div class="modal-sheet">
       <div class="confirm-dialog">
@@ -823,12 +1139,57 @@ function showConfirmDialog(title, desc, onConfirm) {
         </div>
       </div>
     </div>`;
-  const overlay = showModal(html, true);
+  const overlay = showModal(html);
 
-  overlay.querySelector('#confirm-cancel').addEventListener('click', closeModal);
+  // 点击背景也视为取消
+  overlay.onCloseAttempt = () => {
+    closeModal();
+    if (onCancel) onCancel();
+  };
+
+  overlay.querySelector('#confirm-cancel').addEventListener('click', () => {
+    closeModal();
+    if (onCancel) onCancel();
+  });
   overlay.querySelector('#confirm-ok').addEventListener('click', () => {
     closeModal();
     if (onConfirm) onConfirm();
+  });
+}
+
+function showUnsavedChangesDialog(title, desc, onSave, onDiscard, onCancel) {
+  const html = `
+    <div class="modal-sheet">
+      <div class="confirm-dialog">
+        <div class="confirm-dialog-icon">⚠️</div>
+        <div class="confirm-dialog-title">${title}</div>
+        <div class="confirm-dialog-desc">${desc}</div>
+        <div style="display:flex;gap:10px;margin-bottom:10px;">
+          <button class="btn btn-secondary" id="unsaved-discard" style="flex:1;">不保存</button>
+          <button class="btn btn-primary" id="unsaved-save" style="flex:1;">保存</button>
+        </div>
+        <button class="btn btn-block" id="unsaved-cancel" style="width:100%;background:var(--color-border-light);color:var(--color-text);">取消</button>
+      </div>
+    </div>`;
+  const overlay = showModal(html);
+
+  // 点击背景也视为取消
+  overlay.onCloseAttempt = () => {
+    closeModal();
+    if (onCancel) onCancel();
+  };
+
+  overlay.querySelector('#unsaved-discard').addEventListener('click', () => {
+    closeModal();
+    if (onDiscard) onDiscard();
+  });
+  overlay.querySelector('#unsaved-save').addEventListener('click', async () => {
+    closeModal();
+    if (onSave) await onSave();
+  });
+  overlay.querySelector('#unsaved-cancel').addEventListener('click', () => {
+    closeModal();
+    if (onCancel) onCancel();
   });
 }
 
@@ -1062,9 +1423,15 @@ async function loadData() {
 
   // 按创建时间排序
   state.periods.sort((a, b) => b.createdAt - a.createdAt);
+  // 内置标签按 DEFAULT_TAGS 顺序，自定义标签按名称拼音
+  const builtinOrder = DEFAULT_TAGS.map((t) => t.id);
   state.tags.sort((a, b) => {
-    if (a.builtin !== b.builtin) return a.builtin ? -1 : 1;
-    return a.name.localeCompare(b.name, 'zh');
+    const aIdx = builtinOrder.indexOf(a.id);
+    const bIdx = builtinOrder.indexOf(b.id);
+    if (aIdx !== -1 && bIdx !== -1) return aIdx - bIdx;  // 两个都是内置
+    if (aIdx !== -1) return -1;  // a是内置，排前
+    if (bIdx !== -1) return 1;   // b是内置，排前
+    return a.name.localeCompare(b.name, 'zh');  // 都是自定义，按拼音
   });
 }
 
@@ -1167,18 +1534,13 @@ function renderHome() {
   updateHeader('任务助手');
   const content = $('#app-content');
 
-  // === 模式切换条 ===
-  const modeToggleHtml = `
-    <div class="mode-toggle" id="mode-toggle">
-      <button class="mode-toggle-btn${!state.reviewMode ? ' active' : ''}" data-mode="tasks">📋 任务列表</button>
-      <button class="mode-toggle-btn${state.reviewMode ? ' active' : ''}" data-mode="review">🔄 复盘模式</button>
-      <span class="save-indicator" id="save-indicator">✓ 已保存</span>
-    </div>`;
+  // === 保存指示器 ===
+  const saveIndicatorHtml = '<span class="save-indicator" id="save-indicator">✓ 已保存</span>';
 
-  // 复盘模式下浮动结束按钮（固定定位，不随页面滚动）
-  const reviewEndFloat = state.reviewMode
+  // 浮动按钮：复盘模式显示“结束复盘”，任务列表模式显示“立即复盘”
+  const reviewFloatBtn = state.reviewMode
     ? '<button class="review-end-float" id="btn-end-review">结束复盘</button>'
-    : '';
+    : '<button class="review-start-float" id="btn-start-review-float">🔄 立即复盘</button>';
 
   // 获取当前时间段的筛选任务
   let periodTasks;
@@ -1191,8 +1553,8 @@ function renderHome() {
   } else {
     periodTasks = [...state.tasks];
   }
-  // 复盘模式下始终展示全部任务，任务列表模式下按时间段筛选
-  let sourceTasks = state.reviewMode ? [...state.tasks] : periodTasks;
+  // 复盘模式和任务列表模式均按时间段筛选
+  let sourceTasks = periodTasks;
 
   // 保留一份筛选前的副本，用于标签计数（不受标签筛选影响）
   const baseTasks = sourceTasks;
@@ -1239,8 +1601,12 @@ function renderHome() {
     }
   }
 
-  // 时间段选择器：预设时段，按是否有任务排序（有内容的在前）
+  // 时间段选择器：复盘模式下“全部”固定在最前；任务列表模式按是否有任务排序
   const sortedPresets = [...PRESET_PERIODS].sort((a, b) => {
+    if (state.reviewMode) {
+      if (a.id === 'all') return -1;
+      if (b.id === 'all') return 1;
+    }
     const ca = countPeriodTasks(a.id);
     const cb = countPeriodTasks(b.id);
     if (ca > 0 && cb === 0) return -1;
@@ -1248,24 +1614,40 @@ function renderHome() {
     return 0;
   });
 
-  const periodChips = sortedPresets.map(
-    (p) => {
-      const count = countPeriodTasks(p.id);
+  function countAllPeriodTasks(periodId) {
+    if (periodId === 'all') return state.tasks.length;
+    const range = getPresetDateRange(periodId);
+    if (!range) return 0;
+    return state.tasks.filter((t) => {
+      const ref = t.deadline || t.createdAt;
+      return ref >= range.start && ref <= range.end;
+    }).length;
+  }
+
+  const periodChips = sortedPresets
+    .filter((p) => {
+      const count = countAllPeriodTasks(p.id);
+      return count > 0 || p.id === state.currentPeriodId;
+    })
+    .map((p) => {
+      const count = countAllPeriodTasks(p.id);
       return `<span class="period-chip period-preset${p.id === state.currentPeriodId ? ' active' : ''}" data-period="${p.id}">${p.icon} ${p.name}${count > 0 ? ` <small style="opacity:0.7;">${count}</small>` : ''}</span>`;
-    }
-  ).join('');
+    })
+    .join('');
 
   const periodSection = `
       <div class="period-selector" id="period-selector">
         ${periodChips}
       </div>`;
 
-  // 标签筛选条
+  // 标签筛选条（隐藏无任务的标签）
   const tagFilterChips = state.tags
     .map((t) => {
-      const count = baseTasks.filter((task) => (task.tags || []).includes(t.id) && task.status !== 'done').length;
-      return `<span class="tag-filter-chip${state.currentTagFilter === t.id ? ' active' : ''}" data-tag="${t.id}">${t.name}${count > 0 ? ` <small>${count}</small>` : ''}</span>`;
+      const count = baseTasks.filter((task) => (task.tags || []).includes(t.id)).length;
+      return { t, count };
     })
+    .filter(({ t, count }) => count > 0 || state.currentTagFilter === t.id)
+    .map(({ t, count }) => `<span class="tag-filter-chip${state.currentTagFilter === t.id ? ' active' : ''}" data-tag="${t.id}">${t.name}${count > 0 ? ` <small>${count}</small>` : ''}</span>`)
     .join('');
   const tagFilterBar = `
       <div class="tag-filter-bar" id="tag-filter-bar">
@@ -1308,31 +1690,105 @@ function renderHome() {
   }
 
   content.innerHTML = `
-    ${modeToggleHtml}
+    ${saveIndicatorHtml}
     ${installBanner}
     ${reviewBanner}
-    ${state.reviewMode ? '' : periodSection}
+    ${periodSection}
     ${tagFilterBar}
     ${taskListHtml}
-    ${reviewEndFloat}
+    ${reviewFloatBtn}
   `;
 
   // === 事件绑定 ===
 
-  // 模式切换
-  content.querySelectorAll('.mode-toggle-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      state.reviewMode = btn.dataset.mode === 'review';
+  // 立即复盘浮动按钮
+  const startReviewFloat = content.querySelector('#btn-start-review-float');
+  if (startReviewFloat) {
+    startReviewFloat.addEventListener('click', () => {
+      state.reviewMode = true;
+      state.currentPeriodId = 'all';
+      state.reviewTouched.clear();
       renderHome();
     });
-  });
+  }
 
-  // 任务卡片点击（正常模式）
-  content.querySelectorAll('.task-card').forEach((card) => {
-    card.addEventListener('click', () => {
-      const taskId = card.dataset.taskId;
-      const task = state.tasks.find((t) => t.id === taskId);
-      if (task) showEditTaskModal(task);
+  // 任务卡片左滑删除（支持触屏 + 鼠标）
+  const SWIPE_THRESHOLD = 40;
+  content.querySelectorAll('.task-card-wrapper').forEach((wrapper) => {
+    const card = wrapper.querySelector('.task-card');
+    const deleteBtn = wrapper.querySelector('.task-delete-btn');
+    let startX = 0;
+    let startY = 0;
+    let deltaX = 0;
+    let swiping = false;
+    let pointerDown = false;
+
+    function closeSwipe() {
+      wrapper.classList.remove('swiped');
+      deleteBtn.textContent = '删除';
+      deleteBtn.classList.remove('confirm');
+    }
+
+    // 统一指针事件（触屏 + 鼠标）
+    card.addEventListener('pointerdown', (e) => {
+      startX = e.clientX;
+      startY = e.clientY;
+      deltaX = 0;
+      swiping = false;
+      pointerDown = true;
+    });
+
+    card.addEventListener('pointermove', (e) => {
+      if (!pointerDown) return;
+      deltaX = e.clientX - startX;
+      const deltaY = Math.abs(e.clientY - startY);
+      if (Math.abs(deltaX) > deltaY && deltaX < 0) {
+        swiping = true;
+      }
+    });
+
+    card.addEventListener('pointerup', () => {
+      if (!pointerDown) return;
+      pointerDown = false;
+      if (swiping && deltaX < -SWIPE_THRESHOLD) {
+        // 滑动距离足够，打开删除按钮
+        content.querySelectorAll('.task-card-wrapper.swiped').forEach((w) => {
+          if (w !== wrapper) w.classList.remove('swiped');
+        });
+        wrapper.classList.add('swiped');
+      } else if (!swiping) {
+        // 普通点击
+        if (!wrapper.classList.contains('swiped')) {
+          const taskId = wrapper.dataset.taskId;
+          const task = state.tasks.find((t) => t.id === taskId);
+          if (task) showEditTaskModal(task);
+        } else {
+          closeSwipe();
+        }
+      } else {
+        // 滑动距离不够，回弹
+        closeSwipe();
+      }
+    });
+
+    card.addEventListener('pointercancel', () => {
+      pointerDown = false;
+      closeSwipe();
+    });
+
+    // 删除按钮点击：第一次变“确认删除”，第二次执行删除
+    deleteBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (deleteBtn.classList.contains('confirm')) {
+        const taskId = wrapper.dataset.taskId;
+        await dbDelete('tasks', taskId);
+        showToast('任务已删除', 'success');
+        await loadData();
+        renderHome();
+      } else {
+        deleteBtn.textContent = '确认删除';
+        deleteBtn.classList.add('confirm');
+      }
     });
   });
 
@@ -1359,6 +1815,8 @@ function renderHome() {
   if (reviewBtn) {
     reviewBtn.addEventListener('click', () => {
       state.reviewMode = true;
+      state.currentPeriodId = 'all';
+      state.reviewTouched.clear();
       renderHome();
     });
   }
@@ -1408,17 +1866,24 @@ function renderTaskCard(task) {
       : '';
 
   return `
-    <div class="task-card priority-${task.priority}${isDone ? ' done' : ''}" data-task-id="${task.id}">
-      <div class="task-card-header">
-        <span class="task-card-title">${escapeHtml(task.name)}</span>
-        <span class="badge badge-priority-${task.priority}">${priorityInfo.icon || ''} ${priorityInfo.label || task.priority}</span>
+    <div class="task-card-wrapper" data-task-id="${task.id}">
+      <div class="task-card priority-${task.priority}${isDone ? ' done' : ''}" data-task-id="${task.id}">
+        <div class="task-card-header">
+          <span class="task-card-title">${escapeHtml(task.name)}</span>
+          <span class="badge badge-priority-${task.priority}">${priorityInfo.icon || ''} ${priorityInfo.label || task.priority}</span>
+        </div>
+        <div class="task-card-meta">
+          <div class="task-card-meta-left">
+            ${deadlineDisplay}
+            ${statusBadge}
+          </div>
+          ${tagBadges ? `<div class="task-card-tags">${tagBadges}</div>` : ''}
+        </div>
+        ${latestProgress(task) ? `<div class="task-card-progress">最新进展：${escapeHtml(latestProgress(task)).slice(0, 50)}${latestProgress(task).length > 50 ? '...' : ''}</div>` : ''}
       </div>
-      <div class="task-card-meta">
-        ${deadlineDisplay}
-        ${statusBadge}
-        ${tagBadges}
+      <div class="task-delete-zone">
+        <button class="task-delete-btn">删除</button>
       </div>
-      ${latestProgress(task) ? `<div style="margin-top:6px;font-size:12px;color:var(--color-text-hint);">💬 ${escapeHtml(latestProgress(task)).slice(0, 50)}${latestProgress(task).length > 50 ? '...' : ''}</div>` : ''}
     </div>`;
 }
 
@@ -1429,7 +1894,7 @@ function renderReviewList(sorted) {
   let html = '';
   const activeTasks = sorted.filter((t) => t.status !== 'done');
   const doneTasks = sorted.filter((t) => t.status === 'done');
-  const reviewedCount = doneTasks.length;
+  const reviewedCount = state.reviewTouched.size;
   const totalCount = sorted.length;
 
   // 排序控件
@@ -1448,24 +1913,28 @@ function renderReviewList(sorted) {
   html += `<span style="white-space:nowrap;">排序：</span>`;
   html += `<select class="review-sort-select" id="review-sort-by" style="font-size:12px;padding:4px 8px;border:1px solid var(--color-border);border-radius:6px;background:var(--color-surface);color:var(--color-text);">${sortOptionsHtml}</select>`;
   html += `</div>`;
+  html += `<div style="display:flex;align-items:center;gap:8px;">`;
   html += `<label style="display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap;">`;
   html += `<input type="checkbox" id="review-done-first"${state.reviewDoneFirst ? ' checked' : ''} style="width:14px;height:14px;"> 已完成放顶部`;
-  html += `</label>`;
+  html += `</label></div>`;
   html += `</div>`;
 
-  html += `<div style="font-size:13px;color:var(--color-text-hint);margin-bottom:6px;">${new Date().toLocaleDateString('zh-CN', { weekday: 'long', month: 'long', day: 'numeric' })}  · 已复盘 ${reviewedCount}/${totalCount}</div>`;
+  html += `<div style="display:flex;align-items:center;justify-content:space-between;font-size:13px;color:var(--color-text-hint);margin-bottom:6px;">`;
+  html += `<span>${new Date().toLocaleDateString('zh-CN', { weekday: 'long', month: 'long', day: 'numeric' })}  · 已复盘 ${reviewedCount}/${totalCount}</span>`;
+  html += `<button id="review-collapse-all" style="font-size:11px;padding:2px 8px;border:1px solid var(--color-border);border-radius:6px;background:var(--color-surface);color:var(--color-text-secondary);cursor:pointer;">全部收起</button>`;
+  html += `</div>`;
 
   if (sorted.length === 0) {
     html += `<div class="empty-state"><div class="empty-icon">🎉</div><div class="empty-title">当前时段没有任务</div></div>`;
   } else {
-    if (activeTasks.length > 0) {
-      html += `<div class="section-header"><span class="section-title">需要关注 (${activeTasks.length})</span></div>`;
-      activeTasks.forEach((t) => { html += renderReviewTask(t); });
-    }
-    if (doneTasks.length > 0) {
-      html += `<div class="section-header"><span class="section-title" style="color:var(--color-success);">✅ 已完成 (${doneTasks.length})</span></div>`;
-      doneTasks.forEach((t) => { html += renderReviewTask(t); });
-    }
+    const activeSection = activeTasks.length > 0
+      ? `<div class="section-header"><span class="section-title">需要关注 (${activeTasks.length})</span></div>${activeTasks.map((t) => renderReviewTask(t)).join('')}`
+      : '';
+    const doneSection = doneTasks.length > 0
+      ? `<div class="section-header"><span class="section-title" style="color:var(--color-success);">✅ 已完成 (${doneTasks.length})</span></div>${doneTasks.map((t) => renderReviewTask(t)).join('')}`
+      : '';
+    // 已完成放顶部：先已完成再需要关注；否则反过来
+    html += state.reviewDoneFirst ? (doneSection + activeSection) : (activeSection + doneSection);
   }
 
   return html;
@@ -1473,6 +1942,40 @@ function renderReviewList(sorted) {
 
 // 绑定复盘模式下的交互事件
 function bindReviewInteractions(content) {
+  // 单个任务收起/展开
+  content.querySelectorAll('.review-collapse-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const taskId = btn.closest('.review-task').dataset.taskId;
+      state.reviewCollapsed.add(taskId);
+      renderHome();
+    });
+  });
+  // 已收起的卡片，点击即展开
+  content.querySelectorAll('.review-task.collapsed').forEach((el) => {
+    el.addEventListener('click', () => {
+      const taskId = el.dataset.taskId;
+      state.reviewCollapsed.delete(taskId);
+      renderHome();
+    });
+  });
+
+  // 全部收起/展开按钮
+  const collapseAllBtn = content.querySelector('#review-collapse-all');
+  if (collapseAllBtn) {
+    const allTaskEls = content.querySelectorAll('.review-task');
+    const allIds = Array.from(allTaskEls).map((el) => el.dataset.taskId);
+    const allCollapsed = allIds.length > 0 && allIds.every((id) => state.reviewCollapsed.has(id));
+    collapseAllBtn.textContent = allCollapsed ? '全部展开' : '全部收起';
+    collapseAllBtn.addEventListener('click', () => {
+      if (allCollapsed) {
+        state.reviewCollapsed.clear();
+      } else {
+        allIds.forEach((id) => state.reviewCollapsed.add(id));
+      }
+      renderHome();
+    });
+  }
+
   content.querySelectorAll('.review-task').forEach((el) => {
     const taskId = el.dataset.taskId;
     const task = state.tasks.find((t) => t.id === taskId);
@@ -1483,6 +1986,7 @@ function bindReviewInteractions(content) {
       statusSelect.addEventListener('change', async () => {
         task.status = statusSelect.value;
         task.updatedAt = Date.now();
+        state.reviewTouched.add(task.id);
         await dbPut('tasks', task);
         await loadData();
         renderHome();
@@ -1495,6 +1999,7 @@ function bindReviewInteractions(content) {
       prioritySelect.addEventListener('change', async () => {
         task.priority = prioritySelect.value;
         task.updatedAt = Date.now();
+        state.reviewTouched.add(task.id);
         await dbPut('tasks', task);
         await loadData();
         renderHome();
@@ -1511,6 +2016,7 @@ function bindReviewInteractions(content) {
           const d = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
           task.deadline = d.getTime();
         }
+        state.reviewTouched.add(task.id);
         task.updatedAt = Date.now();
         await dbPut('tasks', task);
         await loadData();
@@ -1520,28 +2026,52 @@ function bindReviewInteractions(content) {
     }
 
     const progressInput = el.querySelector('.review-progress');
-    if (progressInput) {
-      progressInput.addEventListener('blur', async () => {
+    const saveBtn = el.querySelector('.review-progress-save');
+    if (progressInput && saveBtn) {
+      // 输入时显示保存按钮
+      progressInput.addEventListener('input', () => {
+        saveBtn.style.display = progressInput.value.trim() ? 'inline-block' : 'none';
+      });
+      // 点击保存按钮提交进展
+      saveBtn.addEventListener('click', async () => {
         const content = progressInput.value.trim();
-        if (content) {
-          appendProgress(task, content);
-          task.updatedAt = Date.now();
-          await dbPut('tasks', task);
-          await loadData();
-          progressInput.value = ''; // 清空，避免重复提交同一条
-          showSaveIndicator();
-        }
+        if (!content) return;
+        appendProgress(task, content);
+        task.updatedAt = Date.now();
+        state.reviewTouched.add(task.id);
+        await dbPut('tasks', task);
+        await loadData();
+        progressInput.value = '';
+        saveBtn.style.display = 'none';
+        showSaveIndicator();
       });
     }
   });
 
-  // 结束复盘按钮
+  // 结束复盘按钮（先保存所有未保存的进展）
   const endBtn = content.querySelector('#btn-end-review');
   if (endBtn) {
     endBtn.addEventListener('click', async () => {
+      // 批量保存所有已输入但未保存的进展
+      const progressInputs = content.querySelectorAll('.review-progress');
+      for (const input of progressInputs) {
+        const content_ = input.value.trim();
+        if (content_) {
+          const taskId = input.closest('.review-task')?.dataset.taskId;
+          const task = state.tasks.find((t) => t.id === taskId);
+          if (task) {
+            appendProgress(task, content_);
+            task.updatedAt = Date.now();
+            state.reviewTouched.add(task.id);
+            await dbPut('tasks', task);
+          }
+        }
+      }
       await dbPut('settings', { key: 'lastReviewDate', value: todayString() });
       await loadData();
       state.reviewMode = false;
+      state.reviewTouched.clear();
+      state.currentPeriodId = getDefaultPeriodId();
       showToast('复盘完成，明天继续加油 💪', 'success');
       renderHome();
       autoBackup();
@@ -1568,8 +2098,21 @@ function bindReviewInteractions(content) {
 function renderReviewTask(task) {
   const priorityInfo = PRIORITY_CONFIG[task.priority] || {};
   const isDone = task.status === 'done';
-  // 用本地时间格式化日期，与任务列表显式一致，避免时区偏移
+  const isCollapsed = state.reviewCollapsed.has(task.id);
   const deadlineDate = toDateString(task.deadline);
+  const deadlineClass = getDeadlineClass(task.deadline);
+  const deadlineText = task.deadline
+    ? (task.deadline % (24 * 3600000) === 0 ? formatDate(task.deadline) : formatDateTime(task.deadline))
+    : '';
+  const deadlineDisplay = deadlineText
+    ? `<span class="badge-deadline ${deadlineClass}">📅 ${deadlineText}</span>`
+    : '';
+
+  const statusBadge = isDone
+    ? '<span class="badge badge-status">已完成</span>'
+    : task.status === 'progress'
+      ? '<span class="badge badge-status progress">进行中</span>'
+      : '';
 
   const priorityOptions = PRIORITY_ORDER.map(
     (key) =>
@@ -1577,34 +2120,43 @@ function renderReviewTask(task) {
   ).join('');
 
   return `
-    <div class="review-task${isDone ? ' done' : ''}" data-task-id="${task.id}">
-      <div class="review-task-name" style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;">
-        <span style="flex:1;">${escapeHtml(task.name)}</span>
+    <div class="review-task priority-${task.priority}${isDone ? ' done' : ''}${isCollapsed ? ' collapsed' : ''}" data-task-id="${task.id}">
+      <div class="review-task-header">
+        <span class="review-task-name-text">${escapeHtml(task.name)}</span>
+        ${isCollapsed ? '' : '<button class="review-collapse-btn">收起</button>'}
+      </div>
+
+      <div class="review-task-compact"${isCollapsed ? '' : ' style="display:none;"'}>
+        ${deadlineDisplay}
+        ${statusBadge}
         <span class="badge badge-priority-${task.priority}">${priorityInfo.icon || ''} ${priorityInfo.label || ''}</span>
       </div>
 
-      <div class="review-task-field">
-        <span class="review-task-field-label">状态</span>
-        <select class="review-status">
-          <option value="todo"${task.status === 'todo' ? ' selected' : ''}>待办</option>
-          <option value="progress"${task.status === 'progress' ? ' selected' : ''}>进行中</option>
-          <option value="done"${task.status === 'done' ? ' selected' : ''}>已完成</option>
-        </select>
-      </div>
+      <div class="review-task-details"${isCollapsed ? ' style="display:none;"' : ''}>
+        <div class="review-task-field">
+          <span class="review-task-field-label">状态</span>
+          <select class="review-status">
+            <option value="todo"${task.status === 'todo' ? ' selected' : ''}>待办</option>
+            <option value="progress"${task.status === 'progress' ? ' selected' : ''}>进行中</option>
+            <option value="done"${task.status === 'done' ? ' selected' : ''}>已完成</option>
+          </select>
+        </div>
 
-      <div class="review-task-field">
-        <span class="review-task-field-label">优先级</span>
-        <select class="review-priority">${priorityOptions}</select>
-      </div>
+        <div class="review-task-field">
+          <span class="review-task-field-label">优先级</span>
+          <select class="review-priority">${priorityOptions}</select>
+        </div>
 
-      <div class="review-task-field">
-        <span class="review-task-field-label">截止</span>
-        <input type="date" class="review-deadline" value="${deadlineDate}" style="flex:1;" onfocus="this.showPicker()">
-      </div>
+        <div class="review-task-field">
+          <span class="review-task-field-label">截止</span>
+          <input type="date" class="review-deadline" value="${deadlineDate}" style="flex:1;" onfocus="this.showPicker()">
+        </div>
 
-      <div class="review-task-field">
-        <span class="review-task-field-label">进展</span>
-        <input type="text" class="review-progress" value="" placeholder="${latestProgress(task) ? '上次：' + latestProgress(task).slice(0, 20) : '记录新进展...'}" style="flex:1;">
+        <div class="review-task-field">
+          <span class="review-task-field-label">进展</span>
+          <input type="text" class="review-progress" value="" placeholder="${latestProgress(task) ? '上次：' + latestProgress(task).slice(0, 20) : '记录新进展...'}" style="flex:1;">
+          <button class="review-progress-save" style="display:none;">保存</button>
+        </div>
       </div>
     </div>`;
 }
@@ -1841,6 +2393,8 @@ function switchTab(tab) {
   if (!tab) return; // 忽略没有 data-tab 的按钮（如中间的 +）
   if (state.reviewMode && tab !== 'home') {
     state.reviewMode = false;
+    state.reviewTouched.clear();
+    state.currentPeriodId = getDefaultPeriodId();
   }
   state.currentTab = tab;
   renderCurrentView();
@@ -1867,7 +2421,16 @@ async function initApp() {
   });
 
   // FAB 按钮
-  $('#fab-btn').addEventListener('click', () => {
+  $('#fab-btn').addEventListener('click', async () => {
+    if (state.reviewMode) {
+      // 复盘模式下点击新建：先结束复盘再弹出
+      await dbPut('settings', { key: 'lastReviewDate', value: todayString() });
+      await loadData();
+      state.reviewMode = false;
+      state.reviewTouched.clear();
+      state.currentPeriodId = getDefaultPeriodId();
+      renderHome();
+    }
     showAddTaskModal(state.currentPeriodId);
   });
 

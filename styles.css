@@ -128,7 +128,7 @@ body {
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
   padding: 12px 16px;
-  padding-bottom: calc(var(--nav-height) + var(--safe-bottom) + 8px);
+  padding-bottom: calc(var(--nav-height) + var(--safe-bottom) + 68px);
   scroll-behavior: smooth;
 }
 
@@ -250,10 +250,10 @@ body {
 }
 
 .save-indicator {
-  position: absolute;
-  right: 12px;
-  top: 50%;
-  transform: translateY(-50%);
+  position: fixed;
+  right: 16px;
+  top: 70px;
+  z-index: 80;
   font-size: 11px;
   color: var(--color-success);
   white-space: nowrap;
@@ -261,8 +261,8 @@ body {
   transition: opacity 0.3s;
   pointer-events: none;
   background: var(--color-border-light);
-  padding: 2px 6px;
-  border-radius: 4px;
+  padding: 2px 8px;
+  border-radius: 12px;
 }
 
 .save-indicator.show {
@@ -297,6 +297,35 @@ body {
   transform: translateY(0);
 }
 
+/* 任务列表模式浮动立即复盘按钮 */
+.review-start-float {
+  position: fixed;
+  bottom: calc(var(--nav-height) + var(--safe-bottom) + 20px);
+  right: 16px;
+  z-index: 90;
+  padding: 10px 20px;
+  background: var(--color-surface);
+  color: var(--color-primary);
+  border: 1.5px solid var(--color-primary);
+  border-radius: 24px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  transition: transform 0.2s, opacity 0.2s, box-shadow 0.2s;
+  animation: reviewFloatIn 0.3s ease-out;
+}
+
+.review-start-float:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0,0,0,0.18);
+  background: var(--color-primary-light);
+}
+
+.review-start-float:active {
+  transform: translateY(0);
+}
+
 @keyframes reviewFloatIn {
   from { opacity: 0; transform: translateY(12px); }
   to   { opacity: 1; transform: translateY(0); }
@@ -307,12 +336,61 @@ body {
   background: var(--color-surface);
   border-radius: var(--radius-md);
   padding: 14px 16px;
-  margin-bottom: 10px;
   box-shadow: var(--shadow-sm);
   cursor: pointer;
-  transition: transform var(--transition), box-shadow var(--transition);
+  transition: transform 0.25s ease, box-shadow var(--transition);
   border-left: 3px solid transparent;
   position: relative;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ========== Swipe-to-Delete Wrapper ========== */
+.task-card-wrapper {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  margin-bottom: 10px;
+  isolation: isolate;
+}
+.task-card-wrapper .task-card {
+  margin-bottom: 0;
+  z-index: 2;
+}
+.task-delete-zone {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: stretch;
+  z-index: 1;
+  visibility: hidden;
+}
+.task-card-wrapper.swiped .task-delete-zone {
+  visibility: visible;
+}
+.task-delete-btn {
+  width: 72px;
+  background: var(--color-danger, #e53e3e);
+  color: #fff;
+  border: none;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.task-delete-btn:active {
+  opacity: 0.85;
+}
+.task-delete-btn.confirm {
+  background: #b91c1c;
+}
+.task-card-wrapper.swiped .task-card {
+  transform: translateX(-72px);
+}
+.task-card-wrapper:not(.swiped) .task-card {
+  transform: translateX(0);
 }
 
 .task-card:active {
@@ -320,7 +398,7 @@ body {
 }
 
 .task-card.done {
-  opacity: 0.65;
+  opacity: 0.7;
 }
 
 .task-card.priority-urgent-important {
@@ -360,9 +438,17 @@ body {
 
 .task-card-meta {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
   align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.task-card-meta-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 1;
+  min-width: 0;
 }
 
 /* ========== Badge ========== */
@@ -399,8 +485,26 @@ body {
 }
 
 .badge-tag {
-  background: var(--color-primary-light);
-  color: var(--color-primary-text);
+  background: var(--color-border-light);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  font-size: 11px;
+  padding: 1px 6px;
+}
+
+.task-card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.task-card-progress {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--color-text-hint);
+  line-height: 1.4;
 }
 
 .badge-status {
@@ -573,6 +677,28 @@ body {
   background: var(--color-border-light);
   border-radius: var(--radius-sm);
   padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.progress-delete-btn {
+  flex-shrink: 0;
+  padding: 3px 8px;
+  font-size: 11px;
+  background: none;
+  color: var(--color-danger, #e53e3e);
+  border: 1px solid var(--color-danger, #e53e3e);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.progress-delete-btn:active { opacity: 0.8; }
+.progress-delete-btn.confirm {
+  color: #fff;
+  background: var(--color-danger, #e53e3e);
+  border-color: var(--color-danger, #e53e3e);
 }
 
 .progress-timeline-text {
@@ -822,6 +948,26 @@ body {
   font-size: 11px;
   color: var(--color-text-hint);
   margin-top: 2px;
+}
+
+/* Priority compact (new task form) */
+.add-priority-compact {
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+.add-priority-compact .priority-option {
+  padding: 6px 4px;
+  border-width: 1.5px;
+}
+.add-priority-compact .priority-option-icon {
+  font-size: 18px;
+  margin-bottom: 2px;
+}
+.add-priority-compact .priority-option-label {
+  font-size: 11px;
+}
+.add-priority-compact .priority-option-desc {
+  display: none;
 }
 
 /* ========== Tag Chips ========== */
@@ -1140,8 +1286,13 @@ body {
   padding: 16px;
   margin-bottom: 12px;
   box-shadow: var(--shadow-sm);
-  border-left: 4px solid var(--color-primary);
+  border-left: 3px solid transparent;
 }
+
+.review-task.priority-urgent-important { border-left-color: var(--color-urgent-important); }
+.review-task.priority-important         { border-left-color: var(--color-important); }
+.review-task.priority-urgent            { border-left-color: var(--color-urgent); }
+.review-task.priority-low               { border-left-color: var(--color-low); }
 
 .review-task.done {
   border-left-color: var(--color-success);
@@ -1153,6 +1304,57 @@ body {
   font-weight: 600;
   margin-bottom: 10px;
   line-height: 1.4;
+}
+
+.review-task-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.review-task-name-text {
+  flex: 1;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.4;
+  word-break: break-all;
+}
+.review-collapse-btn {
+  background: none;
+  border: 1px solid var(--color-border);
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+  line-height: 1.5;
+}
+.review-collapse-btn:active {
+  background: var(--color-border);
+}
+
+.review-task-compact {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+.review-compact-chip {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  background: var(--color-bg);
+  padding: 2px 8px;
+  border-radius: 20px;
+  border: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+
+.review-task.collapsed {
+  padding: 10px 16px;
+  margin-bottom: 8px;
+  cursor: pointer;
 }
 
 .review-task-actions {
@@ -1172,6 +1374,21 @@ body {
   font-size: 12px;
   color: var(--color-text-hint);
   min-width: 36px;
+}
+
+.review-progress-save {
+  padding: 4px 10px;
+  font-size: 12px;
+  background: var(--color-primary);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.review-progress-save:active {
+  opacity: 0.8;
 }
 
 .review-task-field select,
