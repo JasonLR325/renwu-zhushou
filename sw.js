@@ -85,8 +85,8 @@ async function triggerReviewNotification() {
   const allClients = await clients.matchAll({ type: 'window' });
   if (allClients.length === 0) {
     // 应用未打开，发送通知
-    self.registration.showNotification('📋 每日复盘提醒', {
-      body: '该进行今天的任务复盘了，回顾一下进展吧！',
+    self.registration.showNotification('📋 复盘提醒', {
+      body: '该进行任务复盘了，回顾一下进展吧！',
       icon: './icons/icon-192.png',
       badge: './icons/icon-192.png',
       vibrate: [200, 100, 200],

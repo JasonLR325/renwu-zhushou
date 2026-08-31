@@ -1,7 +1,7 @@
 {
   "name": "任务助手",
   "short_name": "任务助手",
-  "description": "个人任务管理与每日复盘工具",
+  "description": "个人任务管理与复盘提醒工具",
   "start_url": "./index.html",
   "display": "standalone",
   "orientation": "portrait",

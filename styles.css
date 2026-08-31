@@ -9,15 +9,19 @@
   --color-primary-hover: #4338CA;
   --color-primary-text: #312E81;
 
-  /* 优先级颜色 */
+  /* 优先级颜色（从红到灰） */
   --color-urgent-important: #EF4444;
   --color-urgent-important-bg: #FEF2F2;
   --color-important: #F59E0B;
   --color-important-bg: #FFFBEB;
-  --color-urgent: #3B82F6;
-  --color-urgent-bg: #EFF6FF;
+  --color-urgent: #EAB308;
+  --color-urgent-bg: #FEFCE8;
   --color-low: #94A3B8;
   --color-low-bg: #F8FAFC;
+
+  /* 进行中状态色（原蓝色独立出来） */
+  --color-progress: #3B82F6;
+  --color-progress-bg: #EFF6FF;
 
   /* 功能色 */
   --color-success: #10B981;
@@ -414,6 +418,11 @@ body {
   border-left-color: var(--color-low);
 }
 
+/* 已逾期卡片淡红底色 */
+.task-card.overdue {
+  background: var(--color-danger-bg);
+}
+
 .task-card-header {
   display: flex;
   align-items: flex-start;
@@ -426,9 +435,18 @@ body {
   font-size: 15px;
   font-weight: 600;
   color: var(--color-text);
-  flex: 1;
   line-height: 1.4;
   word-break: break-all;
+  min-width: 0;
+  flex-shrink: 1;
+}
+
+/* 任务卡片右下角：添加时间 */
+.task-card-created {
+  font-size: 11px;
+  color: var(--color-text-hint);
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .task-card.done .task-card-title {
@@ -493,6 +511,32 @@ body {
   padding: 1px 6px;
 }
 
+.badge-time {
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  font-size: 11px;
+  padding: 1px 6px;
+  color: var(--color-text-hint);
+}
+
+/* 优先级色点（卡片右上角，仅色点不显示话术） */
+.priority-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.priority-dot-urgent-important { background: var(--color-urgent-important); }
+.priority-dot-important { background: var(--color-important); }
+.priority-dot-urgent { background: var(--color-urgent); }
+.priority-dot-low { background: var(--color-low); }
+
+/* 任务页色点与标题首行垂直居中对齐 */
+.task-card-header .priority-dot {
+  margin-top: 5px;
+}
+
 .task-card-tags {
   display: flex;
   flex-wrap: wrap;
@@ -513,8 +557,8 @@ body {
 }
 
 .badge-status.progress {
-  background: var(--color-urgent-bg);
-  color: var(--color-urgent);
+  background: var(--color-progress-bg);
+  color: var(--color-progress);
 }
 
 .badge-deadline {
@@ -932,10 +976,12 @@ body {
   transform: scale(1.02);
 }
 
-.priority-option-icon {
-  font-size: 24px;
+.priority-option-dot {
   display: block;
-  margin-bottom: 4px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  margin: 4px auto;
 }
 
 .priority-option-label {
@@ -959,9 +1005,10 @@ body {
   padding: 6px 4px;
   border-width: 1.5px;
 }
-.add-priority-compact .priority-option-icon {
-  font-size: 18px;
-  margin-bottom: 2px;
+.add-priority-compact .priority-option-dot {
+  width: 12px;
+  height: 12px;
+  margin: 2px auto;
 }
 .add-priority-compact .priority-option-label {
   font-size: 11px;
@@ -995,8 +1042,10 @@ body {
   border-color: var(--color-primary);
 }
 
-.tag-chip.builtin {
-  font-weight: 500;
+/* 加号胶囊（自定义新标签入口） */
+.tag-chip-add {
+  border-style: dashed;
+  color: var(--color-text-hint);
 }
 
 /* ========== Buttons ========== */
@@ -1094,9 +1143,9 @@ body {
 }
 
 .status-option.progress.selected {
-  background: var(--color-urgent-bg);
-  color: var(--color-urgent);
-  border-color: var(--color-urgent);
+  background: var(--color-progress-bg);
+  color: var(--color-progress);
+  border-color: var(--color-progress);
 }
 
 /* ========== Period List ========== */
@@ -1338,6 +1387,7 @@ body {
 .review-task-compact {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
   margin-top: 4px;
 }
@@ -1374,6 +1424,11 @@ body {
   font-size: 12px;
   color: var(--color-text-hint);
   min-width: 36px;
+}
+
+.review-task-created {
+  font-size: 13px;
+  color: var(--color-text-secondary);
 }
 
 .review-progress-save {

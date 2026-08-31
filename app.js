@@ -7,22 +7,18 @@
 const PRIORITY_CONFIG = {
   'urgent-important': {
     label: '紧急重要',
-    icon: '🔴',
     desc: '有明确截止日期，不做会有严重后果',
   },
   'important': {
     label: '重要不紧急',
-    icon: '🟠',
     desc: '对长期目标很关键，短期不完成也能接受',
   },
   'urgent': {
     label: '紧急不重要',
-    icon: '🟡',
     desc: '时间紧迫但影响不大，可快速处理',
   },
   'low': {
     label: '低优先级',
-    icon: '⚪',
     desc: '有空再做，搁置也不影响大局',
   },
 };
@@ -31,6 +27,7 @@ const PRIORITY_ORDER = ['urgent-important', 'important', 'urgent', 'low'];
 
 const PRESET_PERIODS = [
   { id: 'preset-week', name: '本周', icon: '📅' },
+  { id: 'preset-next-week', name: '下周', icon: '📅' },
   { id: 'preset-month', name: '本月', icon: '📆' },
   { id: 'preset-quarter', name: '本季度', icon: '🗓️' },
   { id: 'preset-year', name: '本年', icon: '📊' },
@@ -48,7 +45,6 @@ const DEADLINE_PRESETS = [
   { id: 'preset-quarter', name: '本季度', icon: '🗓️' },
   { id: 'preset-year', name: '本年', icon: '📊' },
 ];
-const WORKDAY_IDS = new Set(['deadline-week-wd', 'deadline-next-week-wd', 'deadline-month-wd']);
 
 // 2026年法定节假日放假日期
 const HOLIDAYS_2026 = new Set([
@@ -95,6 +91,14 @@ function findLastWorkday(endDate, startDate) {
     d.setDate(d.getDate() - 1);
   }
   return new Date(endDate);
+}
+function findFirstWorkday(startDate, endDate) {
+  const d = new Date(startDate);
+  while (d <= endDate) {
+    if (isWorkdayDate(d)) return new Date(d);
+    d.setDate(d.getDate() + 1);
+  }
+  return new Date(startDate);
 }
 
 // 计算截止日期快捷选项对应的结束日期
@@ -185,13 +189,31 @@ function mapDeadlineToPeriod(deadlinePresetId) {
   switch (deadlinePresetId) {
     case 'deadline-next-week':
     case 'deadline-next-week-wd':
-      return 'preset-week';
+      return 'preset-next-week';
     case 'deadline-week-wd':
       return 'preset-week';
     case 'deadline-month-wd':
       return 'preset-month';
     default:
       return deadlinePresetId;
+  }
+}
+
+// 时段 ID 反向映射为预估选项 ID（编辑任务时恢复初始选中项）
+function mapPeriodToDeadlinePreset(periodId) {
+  switch (periodId) {
+    case 'preset-next-week':
+      return 'deadline-next-week';
+    case 'preset-week':
+      return 'preset-week';
+    case 'preset-month':
+      return 'preset-month';
+    case 'preset-quarter':
+      return 'preset-quarter';
+    case 'preset-year':
+      return 'preset-year';
+    default:
+      return null;
   }
 }
 
@@ -208,6 +230,16 @@ function getPresetDateRange(presetId) {
     case 'preset-week': {
       const day = start.getDay();
       const diff = day === 0 ? -6 : 1 - day;
+      start.setDate(start.getDate() + diff);
+      start.setHours(0, 0, 0, 0);
+      end.setTime(start.getTime());
+      end.setDate(end.getDate() + 6);
+      end.setHours(23, 59, 59, 999);
+      break;
+    }
+    case 'preset-next-week': {
+      const day = start.getDay();
+      const diff = day === 0 ? 1 : 8 - day;
       start.setDate(start.getDate() + diff);
       start.setHours(0, 0, 0, 0);
       end.setTime(start.getTime());
@@ -280,15 +312,9 @@ function getDefaultPeriodId() {
   return sortedPresets[0].id;
 }
 
-const DEFAULT_TAGS = [
-  { id: 'work', name: '工作', builtin: true },
-  { id: 'life', name: '生活', builtin: true },
-  { id: 'study', name: '学习', builtin: true },
-  { id: 'health', name: '健康', builtin: true },
-  { id: 'other', name: '其他', builtin: true },
-];
-
 const DEFAULT_REVIEW_TIME = '21:00';
+
+const WEEKDAY_NAMES = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
 
 const DB_NAME = 'RenWuZhuShouDB';
 const DB_VERSION = 1;
@@ -374,10 +400,9 @@ function generateId() {
 
 async function initDefaultData() {
   const tags = await dbGetAll('tags');
-  if (tags.length === 0) {
-    for (const tag of DEFAULT_TAGS) {
-      await dbPut('tags', tag);
-    }
+  // 清理历史内置标签（已不再使用内置标签，标签全部由用户自定义）
+  for (const tag of tags.filter((t) => t.builtin)) {
+    await dbDelete('tags', tag.id);
   }
 
   const settings = await dbGetAll('settings');
@@ -437,6 +462,20 @@ function formatDateTime(ts) {
   const h = d.getHours().toString().padStart(2, '0');
   const min = d.getMinutes().toString().padStart(2, '0');
   return `${m}月${day}日 ${h}:${min}`;
+}
+
+// 任务添加时间的智能相对格式
+function formatCreatedAt(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const dayMs = 24 * 3600000;
+  const hm = `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+  if (ts >= startOfToday) return `今天 ${hm}`;
+  if (ts >= startOfToday - dayMs) return `昨天 ${hm}`;
+  if (d.getFullYear() === now.getFullYear()) return `${d.getMonth() + 1}月${d.getDate()}日 ${hm}`;
+  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${hm}`;
 }
 
 // 本地时间 → YYYY-MM-DD 字符串（统一工具函数，禁止 toISOString 截取日期）
@@ -535,14 +574,14 @@ function showAddTaskModal(presetPeriodId) {
   const tagChips = state.tags
     .map(
       (t) =>
-        `<span class="tag-chip${t.builtin ? ' builtin' : ''}" data-tag="${t.id}">${t.name}</span>`
+        `<span class="tag-chip" data-tag="${t.id}">${t.name}</span>`
     )
     .join('');
 
   const priorityOptions = PRIORITY_ORDER.map(
     (key) => `
     <div class="priority-option" data-priority="${key}">
-      <span class="priority-option-icon">${PRIORITY_CONFIG[key].icon}</span>
+      <span class="priority-option-dot priority-dot-${key}"></span>
       <div class="priority-option-label">${PRIORITY_CONFIG[key].label}</div>
       <div class="priority-option-desc">${PRIORITY_CONFIG[key].desc}</div>
     </div>`
@@ -565,6 +604,11 @@ function showAddTaskModal(presetPeriodId) {
           <label class="form-label">标签</label>
           <div class="tag-chips" id="add-tag-chips">
             ${tagChips}
+            <span class="tag-chip tag-chip-add" id="add-tag-add-btn">＋ 新标签</span>
+          </div>
+          <div id="add-tag-new-form" style="display:none;margin-top:8px;align-items:center;gap:8px;">
+            <input class="form-input" id="add-tag-new-name" placeholder="输入新标签名称" style="flex:1;">
+            <button class="btn btn-primary btn-sm" id="btn-add-tag-save">保存</button>
           </div>
         </div>
 
@@ -614,22 +658,10 @@ function showAddTaskModal(presetPeriodId) {
   let usingPeriod = 'preset-week'; // 当前选中的预估时段
   let isManual = false; // 是否手动指定日期
 
-  // 根据是否选中“工作”标签，决定快捷选项排序
-  function getSortedPresets() {
-    if (selectedTags.includes('work')) {
-      return [...DEADLINE_PRESETS].sort((a, b) => {
-        const aw = WORKDAY_IDS.has(a.id) ? 0 : 1;
-        const bw = WORKDAY_IDS.has(b.id) ? 0 : 1;
-        return aw - bw;
-      });
-    }
-    return DEADLINE_PRESETS;
-  }
-
   // 渲染时段选择芯片
   const chipsContainer = overlay.querySelector('#add-period-chips');
   function renderPeriodChips() {
-    const presets = getSortedPresets();
+    const presets = DEADLINE_PRESETS;
     chipsContainer.innerHTML = presets
       .map(
         (p) =>
@@ -681,7 +713,10 @@ function showAddTaskModal(presetPeriodId) {
   // 初始化
   renderPeriodChips();
   updateAutoDeadline();
-  overlay.querySelector('#add-task-name').focus();
+  // 聚焦任务名称输入框；弹窗入场动画期间焦点可能丢失，动画结束后补一次
+  const nameInput = overlay.querySelector('#add-task-name');
+  nameInput.focus();
+  setTimeout(() => nameInput.focus(), 200);
 
   // 优先级选择
   overlay.querySelectorAll('.priority-option').forEach((el) => {
@@ -693,7 +728,7 @@ function showAddTaskModal(presetPeriodId) {
   });
 
   // 标签选择
-  overlay.querySelectorAll('#add-tag-chips .tag-chip').forEach((el) => {
+  overlay.querySelectorAll('#add-tag-chips .tag-chip:not(.tag-chip-add)').forEach((el) => {
     el.addEventListener('click', () => {
       el.classList.toggle('selected');
       const tagId = el.dataset.tag;
@@ -702,12 +737,50 @@ function showAddTaskModal(presetPeriodId) {
       } else {
         selectedTags = selectedTags.filter((t) => t !== tagId);
       }
-      // 工作标签与预计完成时间快捷选项联动
-      const newPresets = getSortedPresets();
-      usingPeriod = newPresets[0].id;
-      renderPeriodChips();
-      updateAutoDeadline();
     });
+  });
+
+  // 自定义新标签：点击加号显示输入框，保存后新增标签并选中
+  const addTagAddBtn = overlay.querySelector('#add-tag-add-btn');
+  const addTagForm = overlay.querySelector('#add-tag-new-form');
+  const addTagNameInput = overlay.querySelector('#add-tag-new-name');
+  const addTagSaveBtn = overlay.querySelector('#btn-add-tag-save');
+
+  addTagAddBtn.addEventListener('click', () => {
+    addTagForm.style.display = 'flex';
+    addTagNameInput.focus();
+  });
+
+  async function saveNewAddTag() {
+    const name = addTagNameInput.value.trim();
+    if (!name) { showToast('请输入标签名称', 'error'); return; }
+    if (state.tags.some((t) => t.name === name)) { showToast('标签已存在', 'error'); return; }
+    const newTag = { id: generateId(), name };
+    await dbPut('tags', newTag);
+    state.tags.push(newTag);
+    addTagNameInput.value = '';
+    addTagForm.style.display = 'none';
+    // 插入新标签胶囊并选中
+    const chip = document.createElement('span');
+    chip.className = 'tag-chip selected';
+    chip.dataset.tag = newTag.id;
+    chip.textContent = newTag.name;
+    chip.addEventListener('click', () => {
+      chip.classList.toggle('selected');
+      if (chip.classList.contains('selected')) {
+        selectedTags.push(newTag.id);
+      } else {
+        selectedTags = selectedTags.filter((t) => t !== newTag.id);
+      }
+    });
+    addTagAddBtn.before(chip);
+    selectedTags.push(newTag.id);
+    showToast('标签已添加并选中 ✓', 'success');
+  }
+
+  addTagSaveBtn.addEventListener('click', saveNewAddTag);
+  addTagNameInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); saveNewAddTag(); }
   });
 
   // 切换到手动模式
@@ -765,7 +838,7 @@ async function showEditTaskModal(task) {
   const priorityOptions = PRIORITY_ORDER.map(
     (key) => `
     <div class="priority-option${task.priority === key ? ' selected' : ''}" data-priority="${key}">
-      <span class="priority-option-icon">${PRIORITY_CONFIG[key].icon}</span>
+      <span class="priority-option-dot priority-dot-${key}"></span>
       <div class="priority-option-label">${PRIORITY_CONFIG[key].label}</div>
     </div>`
   ).join('');
@@ -773,7 +846,7 @@ async function showEditTaskModal(task) {
   const tagChips = state.tags
     .map((t) => {
       const sel = task.tags && task.tags.includes(t.id) ? ' selected' : '';
-      return `<span class="tag-chip${t.builtin ? ' builtin' : ''}${sel}" data-tag="${t.id}">${t.name}</span>`;
+      return `<span class="tag-chip${sel}" data-tag="${t.id}">${t.name}</span>`;
     })
     .join('');
 
@@ -839,6 +912,15 @@ async function showEditTaskModal(task) {
         </div>
 
         <div class="form-group">
+          <label class="form-label">📝 进展记录</label>
+          <div style="display:flex;gap:6px;margin-bottom:12px;">
+            <input class="form-input" id="edit-new-progress" placeholder="添加新的进展..." style="flex:1;">
+            <button class="btn btn-primary" id="btn-add-progress" style="display:none;flex-shrink:0;padding:5px 10px;font-size:12px;">保存</button>
+          </div>
+          ${progressTimelineHtml}
+        </div>
+
+        <div class="form-group">
           <label class="form-label">优先级</label>
           <div class="priority-options add-priority-compact" id="edit-priority-options">
             ${priorityOptions}
@@ -846,15 +928,25 @@ async function showEditTaskModal(task) {
         </div>
 
         <div class="form-group">
-          <label class="form-label">截止日期</label>
-          <input class="form-input" type="date" id="edit-task-date" value="${deadlineDate}">
-          <div style="margin-top:6px;display:flex;align-items:center;gap:8px;">
-            <span id="edit-time-toggle" class="time-toggle" style="font-size:12px;color:var(--color-primary);cursor:pointer;${hasTime ? 'display:none' : ''}">+ 添加具体时间</span>
-            <span id="edit-time-row" style="${hasTime ? 'display:flex' : 'display:none'};align-items:center;gap:6px;">
-              <input class="time-input" id="edit-task-hour" value="${deadlineHour}" maxlength="2">
-              <span class="time-separator">:</span>
-              <input class="time-input" id="edit-task-minute" value="${deadlineMin}" maxlength="2">
-            </span>
+          <label class="form-label">⏱ 截止日期</label>
+          <div id="edit-period-mode">
+            <div class="period-selector" id="edit-period-chips" style="padding:0;margin-bottom:6px;"></div>
+            <div style="font-size:12px;color:var(--color-text-hint);margin-bottom:4px;" id="edit-deadline-hint"></div>
+            <span id="edit-switch-manual" style="font-size:12px;color:var(--color-primary);cursor:pointer;">📅 我想指定具体日期</span>
+          </div>
+          <div id="edit-manual-mode" style="display:none;">
+            <input class="form-input" type="date" id="edit-task-date" value="${deadlineDate}">
+            <div style="margin-top:6px;display:flex;align-items:center;gap:8px;">
+              <span id="edit-time-toggle" class="time-toggle" style="font-size:12px;color:var(--color-primary);cursor:pointer;${hasTime ? 'display:none' : ''}">+ 添加具体时间</span>
+              <span id="edit-time-row" style="${hasTime ? 'display:flex' : 'display:none'};align-items:center;gap:6px;">
+                <input class="time-input" id="edit-task-hour" value="${deadlineHour}" maxlength="2">
+                <span class="time-separator">:</span>
+                <input class="time-input" id="edit-task-minute" value="${deadlineMin}" maxlength="2">
+              </span>
+            </div>
+            <div style="margin-top:8px;">
+              <span id="edit-reset-period" style="font-size:12px;color:var(--color-text-hint);cursor:pointer;text-decoration:underline;">🔄 还是用模糊预估</span>
+            </div>
           </div>
         </div>
 
@@ -862,16 +954,12 @@ async function showEditTaskModal(task) {
           <label class="form-label">标签</label>
           <div class="tag-chips" id="edit-tag-chips">
             ${tagChips}
+            <span class="tag-chip tag-chip-add" id="edit-tag-add-btn">＋ 新标签</span>
           </div>
-        </div>
-
-        <div class="form-group">
-          <label class="form-label">📝 进展记录</label>
-          <div style="display:flex;gap:6px;margin-bottom:12px;">
-            <input class="form-input" id="edit-new-progress" placeholder="添加新的进展..." style="flex:1;">
-            <button class="btn btn-primary" id="btn-add-progress" style="display:none;flex-shrink:0;padding:5px 10px;font-size:12px;">保存</button>
+          <div id="edit-tag-new-form" style="display:none;margin-top:8px;align-items:center;gap:8px;">
+            <input class="form-input" id="edit-tag-new-name" placeholder="输入新标签名称" style="flex:1;">
+            <button class="btn btn-primary btn-sm" id="btn-edit-tag-save">保存</button>
           </div>
-          ${progressTimelineHtml}
         </div>
       </div>
       <div class="modal-footer" style="flex-wrap:wrap;">
@@ -885,6 +973,14 @@ async function showEditTaskModal(task) {
   let editPriority = task.priority;
   let editStatus = task.status;
   let editTags = [...(task.tags || [])];
+
+  // 截止日期模式：有预设时段标识则用时段模式，否则手动模式
+  let editUsingPeriod = null; // 当前选中的预估时段（null 表示手动模式）
+  let editIsManual = !task.periodId || !isPresetPeriod(task.periodId);
+  if (!editIsManual) {
+    editUsingPeriod = mapPeriodToDeadlinePreset(task.periodId);
+    if (!editUsingPeriod) editIsManual = true;
+  }
 
   // 初始状态快照（用于检测未保存的改动，不含进展记录）
   const initialState = {
@@ -951,6 +1047,10 @@ async function showEditTaskModal(task) {
     task.name = name;
     task.priority = editPriority;
     task.deadline = deadline;
+    // 选中了预估时段则同步更新时段归属；手动模式保持原时段归属不变
+    if (editUsingPeriod) {
+      task.periodId = mapDeadlineToPeriod(editUsingPeriod);
+    }
     task.tags = editTags;
     task.status = editStatus;
     task.updatedAt = Date.now();
@@ -977,7 +1077,7 @@ async function showEditTaskModal(task) {
     });
   });
 
-  overlay.querySelectorAll('#edit-tag-chips .tag-chip').forEach((el) => {
+  overlay.querySelectorAll('#edit-tag-chips .tag-chip:not(.tag-chip-add)').forEach((el) => {
     el.addEventListener('click', () => {
       el.classList.toggle('selected');
       const tagId = el.dataset.tag;
@@ -988,6 +1088,115 @@ async function showEditTaskModal(task) {
       }
     });
   });
+
+  // 自定义新标签：点击加号显示输入框，保存后新增标签并选中
+  const editTagAddBtn = overlay.querySelector('#edit-tag-add-btn');
+  const editTagForm = overlay.querySelector('#edit-tag-new-form');
+  const editTagNameInput = overlay.querySelector('#edit-tag-new-name');
+  const editTagSaveBtn = overlay.querySelector('#btn-edit-tag-save');
+
+  editTagAddBtn.addEventListener('click', () => {
+    editTagForm.style.display = 'flex';
+    editTagNameInput.focus();
+  });
+
+  async function saveNewEditTag() {
+    const name = editTagNameInput.value.trim();
+    if (!name) { showToast('请输入标签名称', 'error'); return; }
+    if (state.tags.some((t) => t.name === name)) { showToast('标签已存在', 'error'); return; }
+    const newTag = { id: generateId(), name };
+    await dbPut('tags', newTag);
+    state.tags.push(newTag);
+    editTagNameInput.value = '';
+    editTagForm.style.display = 'none';
+    // 插入新标签胶囊并选中
+    const chip = document.createElement('span');
+    chip.className = 'tag-chip selected';
+    chip.dataset.tag = newTag.id;
+    chip.textContent = newTag.name;
+    chip.addEventListener('click', () => {
+      chip.classList.toggle('selected');
+      if (chip.classList.contains('selected')) {
+        editTags.push(newTag.id);
+      } else {
+        editTags = editTags.filter((t) => t !== newTag.id);
+      }
+    });
+    editTagAddBtn.before(chip);
+    editTags.push(newTag.id);
+    showToast('标签已添加并选中 ✓', 'success');
+  }
+
+  editTagSaveBtn.addEventListener('click', saveNewEditTag);
+  editTagNameInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); saveNewEditTag(); }
+  });
+
+  // ===== 截止日期：时段胶囊（与新建任务一致） =====
+  const editChipsContainer = overlay.querySelector('#edit-period-chips');
+
+  // 渲染时段选择芯片
+  function renderEditPeriodChips() {
+    const presets = DEADLINE_PRESETS;
+    editChipsContainer.innerHTML = presets
+      .map(
+        (p) =>
+          `<span class="period-chip${p.id === editUsingPeriod ? ' active' : ''}" data-period="${p.id}">${p.icon} ${p.name}</span>`
+      )
+      .join('');
+    editChipsContainer.querySelectorAll('.period-chip').forEach((chip) => {
+      chip.addEventListener('click', () => {
+        editUsingPeriod = chip.dataset.period;
+        renderEditPeriodChips();
+        updateEditAutoDeadline();
+      });
+    });
+  }
+
+  // 根据时段自动计算截止日期
+  function updateEditAutoDeadline() {
+    if (!editUsingPeriod) return;
+    const endDate = getDeadlineEndDate(editUsingPeriod);
+    const hint = overlay.querySelector('#edit-deadline-hint');
+    if (endDate) {
+      overlay.querySelector('#edit-task-date').value = toDateString(endDate);
+      hint.textContent = `👉 自动设为 ${formatDate(endDate)}（10:00）`;
+    } else {
+      overlay.querySelector('#edit-task-date').value = '';
+      hint.textContent = '';
+    }
+  }
+
+  // 切换到手动模式
+  function switchEditToManual() {
+    editIsManual = true;
+    overlay.querySelector('#edit-period-mode').style.display = 'none';
+    overlay.querySelector('#edit-manual-mode').style.display = 'block';
+    if (!overlay.querySelector('#edit-task-date').value) {
+      overlay.querySelector('#edit-task-date').value = todayString();
+    }
+  }
+
+  // 切换回时段模式
+  function switchEditToPeriod() {
+    editIsManual = false;
+    if (!editUsingPeriod) editUsingPeriod = DEADLINE_PRESETS[0].id;
+    overlay.querySelector('#edit-period-mode').style.display = 'block';
+    overlay.querySelector('#edit-manual-mode').style.display = 'none';
+    renderEditPeriodChips();
+    updateEditAutoDeadline();
+  }
+
+  overlay.querySelector('#edit-switch-manual').addEventListener('click', switchEditToManual);
+  overlay.querySelector('#edit-reset-period').addEventListener('click', switchEditToPeriod);
+
+  // 初始化截止日期模式
+  if (editIsManual) {
+    switchEditToManual();
+  } else {
+    renderEditPeriodChips();
+    updateEditAutoDeadline();
+  }
 
   overlay.querySelector('#edit-time-toggle')?.addEventListener('click', function () {
     this.style.display = 'none';
@@ -1030,6 +1239,16 @@ async function showEditTaskModal(task) {
     const content = inputEl.value.trim();
     if (!content) { showToast('请输入进展内容', 'error'); return; }
     appendProgress(task, content);
+    // 待办状态添加进展时自动切换为进行中
+    let toastMsg = '进展已记录 ✓';
+    if (editStatus === 'todo') {
+      editStatus = 'progress';
+      task.status = 'progress';
+      overlay.querySelectorAll('#edit-status-toggle .status-option').forEach((e) => {
+        e.classList.toggle('selected', e.dataset.status === 'progress');
+      });
+      toastMsg = '进展已记录，状态已自动切换为进行中 ✓';
+    }
     await dbPut('tasks', task);
     inputEl.value = '';
     addProgressBtn.style.display = 'none';
@@ -1071,7 +1290,7 @@ async function showEditTaskModal(task) {
       container.appendChild(newEntry);
       inputEl.parentElement.after(container);
     }
-    showToast('进展已记录 ✓', 'success');
+    showToast(toastMsg, 'success');
   });
 
   overlay.querySelector('#btn-save-task').addEventListener('click', async () => {
@@ -1213,7 +1432,7 @@ function showTagManageModal() {
         <span>${t.name}</span>
       </div>
       <div style="display:flex;align-items:center;gap:8px;">
-        ${t.builtin ? '<span style="font-size:11px;color:var(--color-text-hint);">内置</span>' : `<button class="btn btn-sm btn-danger" data-delete-tag="${t.id}">删除</button>`}
+        <button class="btn btn-sm btn-danger" data-delete-tag="${t.id}">删除</button>
       </div>
     </div>`
     )
@@ -1245,7 +1464,7 @@ function showTagManageModal() {
     const exists = state.tags.some((t) => t.name === name);
     if (exists) { showToast('标签已存在', 'error'); return; }
 
-    await dbPut('tags', { id: generateId(), name, builtin: false });
+    await dbPut('tags', { id: generateId(), name });
     overlay.querySelector('#new-tag-name').value = '';
     showToast('标签已添加', 'success');
     await loadData();
@@ -1348,20 +1567,36 @@ function importBackup() {
 // ============ 提醒时间设置 ============
 
 function showReviewTimeModal() {
+  const currentDays = getReviewDays();
   const currentTime = state.settings.reviewTime || DEFAULT_REVIEW_TIME;
   const [h, m] = currentTime.split(':');
+
+  const weekdayOptions = WEEKDAY_NAMES.map(
+    (name, i) =>
+      `<span class="tag-chip${currentDays.includes(String(i)) ? ' selected' : ''}" data-day="${i}">${name}</span>`
+  ).join('');
+  const workdayOptions = `
+    <span class="tag-chip${currentDays.includes('first-workday') ? ' selected' : ''}" data-day="first-workday">首个工作日</span>
+    <span class="tag-chip${currentDays.includes('last-workday') ? ' selected' : ''}" data-day="last-workday">最末工作日</span>`;
 
   const html = `
     <div class="modal-sheet">
       <div class="modal-handle"></div>
       <div class="modal-header">
-        <span class="modal-title">设置复盘提醒时间</span>
+        <span class="modal-title">设置复盘提醒</span>
         <button class="modal-close" onclick="closeModal()">✕</button>
       </div>
       <div class="modal-body">
-        <div style="text-align:center;padding:20px 0;">
-          <div style="font-size:14px;color:var(--color-text-hint);margin-bottom:16px;">每天固定时间提醒你复盘任务</div>
-          <div style="display:flex;align-items:center;justify-content:center;gap:8px;">
+        <div class="form-group">
+          <label class="form-label">提醒日期（可多选）</label>
+          <div class="tag-chips" id="review-day-chips">
+            ${weekdayOptions}${workdayOptions}
+          </div>
+          <div style="font-size:12px;color:var(--color-text-hint);margin-top:8px;line-height:1.5;" id="review-day-hint">${getReviewDayHint(currentDays)}</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">提醒时间</label>
+          <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:12px 0;">
             <input class="time-input" id="review-hour" value="${h}" maxlength="2" style="width:80px;font-size:24px;padding:12px;">
             <span style="font-size:24px;font-weight:600;">:</span>
             <input class="time-input" id="review-minute" value="${m}" maxlength="2" style="width:80px;font-size:24px;padding:12px;">
@@ -1374,15 +1609,34 @@ function showReviewTimeModal() {
     </div>`;
 
   const overlay = showModal(html, true);
+  let selDays = [...currentDays];
+
+  overlay.querySelectorAll('#review-day-chips [data-day]').forEach((el) => {
+    el.addEventListener('click', () => {
+      // 多选：点击切换选中状态
+      el.classList.toggle('selected');
+      const day = el.dataset.day;
+      if (selDays.includes(day)) {
+        selDays = selDays.filter((d) => d !== day);
+      } else {
+        selDays.push(day);
+      }
+      overlay.querySelector('#review-day-hint').textContent = getReviewDayHint(selDays);
+    });
+  });
 
   overlay.querySelector('#btn-save-review-time').addEventListener('click', async () => {
+    if (selDays.length === 0) { showToast('请至少选择一个提醒日期', 'error'); return; }
     let hour = parseInt(overlay.querySelector('#review-hour').value) || 21;
     let minute = parseInt(overlay.querySelector('#review-minute').value) || 0;
     hour = Math.max(0, Math.min(23, hour));
     minute = Math.max(0, Math.min(59, minute));
     const time = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
     await dbPut('settings', { key: 'reviewTime', value: time });
-    showToast(`复盘时间已设为 ${time}`, 'success');
+    await dbPut('settings', { key: 'reviewDay', value: selDays });
+    // 重置提醒防重标记，避免保存后因配置变更立即补发
+    await dbPut('settings', { key: 'lastRemindedAt', value: Date.now() });
+    showToast('复盘提醒设置已保存 ✓', 'success');
     closeModal();
     await loadData();
     setupReminderCheck();
@@ -1402,6 +1656,30 @@ async function loadData() {
     state.settings[s.key] = s.value;
   });
   if (!state.settings.reviewTime) state.settings.reviewTime = DEFAULT_REVIEW_TIME;
+  if (state.settings.reviewWeekday === undefined) state.settings.reviewWeekday = 5;
+
+  // 老数据迁移：每日/last-workday 模式已废弃，统一为每周模式（reviewDay 数组）
+  if (state.settings.reviewMode === 'last-workday') {
+    state.settings.reviewDay = ['last-workday'];
+    await dbPut('settings', { key: 'reviewDay', value: ['last-workday'] });
+  } else if (!state.settings.reviewDay) {
+    state.settings.reviewDay = [String(state.settings.reviewWeekday)];
+    await dbPut('settings', { key: 'reviewDay', value: state.settings.reviewDay });
+  } else if (!Array.isArray(state.settings.reviewDay)) {
+    // 单值字符串 → 数组
+    state.settings.reviewDay = [state.settings.reviewDay];
+    await dbPut('settings', { key: 'reviewDay', value: state.settings.reviewDay });
+  }
+  if (state.settings.reviewMode) {
+    await dbDelete('settings', 'reviewMode');
+  }
+
+  // 老数据迁移：复盘记录从日期（lastReviewDate）升级为时间戳（lastReviewAt）
+  if (!state.settings.lastReviewAt && state.settings.lastReviewDate) {
+    state.settings.lastReviewAt = new Date(state.settings.lastReviewDate + 'T23:59:59').getTime();
+    await dbPut('settings', { key: 'lastReviewAt', value: state.settings.lastReviewAt });
+    await dbDelete('settings', 'lastReviewDate');
+  }
 
   // 旧数据兼容：单字符串 progress → progressLog 数组
   let needSave = false;
@@ -1423,16 +1701,8 @@ async function loadData() {
 
   // 按创建时间排序
   state.periods.sort((a, b) => b.createdAt - a.createdAt);
-  // 内置标签按 DEFAULT_TAGS 顺序，自定义标签按名称拼音
-  const builtinOrder = DEFAULT_TAGS.map((t) => t.id);
-  state.tags.sort((a, b) => {
-    const aIdx = builtinOrder.indexOf(a.id);
-    const bIdx = builtinOrder.indexOf(b.id);
-    if (aIdx !== -1 && bIdx !== -1) return aIdx - bIdx;  // 两个都是内置
-    if (aIdx !== -1) return -1;  // a是内置，排前
-    if (bIdx !== -1) return 1;   // b是内置，排前
-    return a.name.localeCompare(b.name, 'zh');  // 都是自定义，按拼音
-  });
+  // 标签按名称拼音排序
+  state.tags.sort((a, b) => a.name.localeCompare(b.name, 'zh'));
 }
 
 // ============ 排序任务 ============
@@ -1581,23 +1851,15 @@ function renderHome() {
   // 未读提醒提示（复盘模式下不显示）
   let reviewBanner = '';
   if (!state.reviewMode) {
-    const lastReviewDate = state.settings.lastReviewDate || '';
-    const today = todayString();
-    if (lastReviewDate !== today) {
-      const reviewTime = state.settings.reviewTime || DEFAULT_REVIEW_TIME;
-      const [h, m] = reviewTime.split(':');
-      const reviewTarget = new Date();
-      reviewTarget.setHours(parseInt(h), parseInt(m), 0, 0);
-      const isPastReview = Date.now() > reviewTarget.getTime();
-      if (isPastReview) {
-        const pendingCount = periodTasks.filter((t) => t.status !== 'done').length;
-        reviewBanner = `
-          <div class="review-banner">
-            <div class="review-banner-title">📋 ${pendingCount > 0 ? `有 ${pendingCount} 件事待复盘` : '今日复盘'}</div>
-            <div class="review-banner-desc">${pendingCount > 0 ? '回顾进度，及时调整计划' : '今天的事情都完成了？回顾一下吧'}</div>
-            <button class="review-banner-btn" id="btn-start-review">开始复盘 →</button>
-          </div>`;
-      }
+    if (!isReviewedInCurrentCycle()) {
+      // 统计全部未完成任务，不受时段/标签筛选影响
+      const pendingCount = state.tasks.filter((t) => t.status !== 'done').length;
+      reviewBanner = `
+        <div class="review-banner">
+          <div class="review-banner-title">📋 ${pendingCount > 0 ? `有 ${pendingCount} 件事待复盘` : '任务复盘'}</div>
+          <div class="review-banner-desc">${pendingCount > 0 ? '回顾进度，及时调整计划' : '回顾一下最近的进展吧'}</div>
+          <button class="review-banner-btn" id="btn-start-review">开始复盘 →</button>
+        </div>`;
     }
   }
 
@@ -1842,13 +2104,16 @@ function renderHome() {
 }
 
 function renderTaskCard(task) {
-  const priorityInfo = PRIORITY_CONFIG[task.priority] || {};
   const deadlineClass = getDeadlineClass(task.deadline);
   const deadlineText = task.deadline
     ? (task.deadline % (24 * 3600000) === 0 ? formatDate(task.deadline) : formatDateTime(task.deadline))
     : '';
   const deadlineDisplay = deadlineText
-    ? `<span class="badge-deadline ${deadlineClass}">📅 ${deadlineText}</span>`
+    ? isOverdue(task.deadline)
+      ? `<span class="badge-deadline overdue">📅 已逾期 · ${deadlineText}</span>`
+      : task.status === 'done'
+        ? `<span class="badge-deadline">📅 ${deadlineText}</span>`
+        : `<span class="badge-deadline ${deadlineClass}">📅 ${deadlineText}前需完成</span>`
     : '';
   const isDone = task.status === 'done';
 
@@ -1865,19 +2130,24 @@ function renderTaskCard(task) {
       ? '<span class="badge badge-status progress">进行中</span>'
       : '';
 
+  const createdDisplay = task.createdAt
+    ? `<div class="task-card-created">添加于${formatCreatedAt(task.createdAt)}</div>`
+    : '';
+
   return `
     <div class="task-card-wrapper" data-task-id="${task.id}">
-      <div class="task-card priority-${task.priority}${isDone ? ' done' : ''}" data-task-id="${task.id}">
+      <div class="task-card priority-${task.priority}${isDone ? ' done' : ''}${isOverdue(task.deadline) && !isDone ? ' overdue' : ''}" data-task-id="${task.id}">
         <div class="task-card-header">
           <span class="task-card-title">${escapeHtml(task.name)}</span>
-          <span class="badge badge-priority-${task.priority}">${priorityInfo.icon || ''} ${priorityInfo.label || task.priority}</span>
+          ${tagBadges ? `<div class="task-card-tags">${tagBadges}</div>` : ''}
+          <span class="priority-dot priority-dot-${task.priority}" style="margin-left:auto;flex-shrink:0;"></span>
         </div>
         <div class="task-card-meta">
           <div class="task-card-meta-left">
             ${deadlineDisplay}
             ${statusBadge}
           </div>
-          ${tagBadges ? `<div class="task-card-tags">${tagBadges}</div>` : ''}
+          ${createdDisplay}
         </div>
         ${latestProgress(task) ? `<div class="task-card-progress">最新进展：${escapeHtml(latestProgress(task)).slice(0, 50)}${latestProgress(task).length > 50 ? '...' : ''}</div>` : ''}
       </div>
@@ -2067,7 +2337,8 @@ function bindReviewInteractions(content) {
           }
         }
       }
-      await dbPut('settings', { key: 'lastReviewDate', value: todayString() });
+      state.settings.lastReviewAt = Date.now();
+      await dbPut('settings', { key: 'lastReviewAt', value: Date.now() });
       await loadData();
       state.reviewMode = false;
       state.reviewTouched.clear();
@@ -2096,7 +2367,6 @@ function bindReviewInteractions(content) {
 }
 
 function renderReviewTask(task) {
-  const priorityInfo = PRIORITY_CONFIG[task.priority] || {};
   const isDone = task.status === 'done';
   const isCollapsed = state.reviewCollapsed.has(task.id);
   const deadlineDate = toDateString(task.deadline);
@@ -2105,7 +2375,11 @@ function renderReviewTask(task) {
     ? (task.deadline % (24 * 3600000) === 0 ? formatDate(task.deadline) : formatDateTime(task.deadline))
     : '';
   const deadlineDisplay = deadlineText
-    ? `<span class="badge-deadline ${deadlineClass}">📅 ${deadlineText}</span>`
+    ? isOverdue(task.deadline)
+      ? `<span class="badge-deadline overdue">📅 已逾期 · ${deadlineText}</span>`
+      : isDone
+        ? `<span class="badge-deadline">📅 ${deadlineText}</span>`
+        : `<span class="badge-deadline ${deadlineClass}">📅 ${deadlineText}前需完成</span>`
     : '';
 
   const statusBadge = isDone
@@ -2116,8 +2390,13 @@ function renderReviewTask(task) {
 
   const priorityOptions = PRIORITY_ORDER.map(
     (key) =>
-      `<option value="${key}"${task.priority === key ? ' selected' : ''}>${PRIORITY_CONFIG[key].icon} ${PRIORITY_CONFIG[key].label}</option>`
+      `<option value="${key}"${task.priority === key ? ' selected' : ''}>${PRIORITY_CONFIG[key].label}</option>`
   ).join('');
+
+  const createdText = task.createdAt ? formatCreatedAt(task.createdAt) : '';
+  const createdBadge = createdText
+    ? `<span class="badge badge-time">添加于${createdText}</span>`
+    : '';
 
   return `
     <div class="review-task priority-${task.priority}${isDone ? ' done' : ''}${isCollapsed ? ' collapsed' : ''}" data-task-id="${task.id}">
@@ -2129,7 +2408,8 @@ function renderReviewTask(task) {
       <div class="review-task-compact"${isCollapsed ? '' : ' style="display:none;"'}>
         ${deadlineDisplay}
         ${statusBadge}
-        <span class="badge badge-priority-${task.priority}">${priorityInfo.icon || ''} ${priorityInfo.label || ''}</span>
+        <span class="priority-dot priority-dot-${task.priority}"></span>
+        ${createdBadge}
       </div>
 
       <div class="review-task-details"${isCollapsed ? ' style="display:none;"' : ''}>
@@ -2157,6 +2437,11 @@ function renderReviewTask(task) {
           <input type="text" class="review-progress" value="" placeholder="${latestProgress(task) ? '上次：' + latestProgress(task).slice(0, 20) : '记录新进展...'}" style="flex:1;">
           <button class="review-progress-save" style="display:none;">保存</button>
         </div>
+
+        ${createdText ? `<div class="review-task-field">
+          <span class="review-task-field-label">添加</span>
+          <span class="review-task-created">${createdText}</span>
+        </div>` : ''}
       </div>
     </div>`;
 }
@@ -2185,6 +2470,8 @@ function renderSettings() {
   updateHeader('我的');
   const content = $('#app-content');
   const reviewTime = state.settings.reviewTime || DEFAULT_REVIEW_TIME;
+  // 注释行只讲周期，右侧值只讲时间，避免重复
+  const reviewPeriodDesc = `每周${getReviewDayDesc()}`;
   const totalTasks = state.tasks.length;
   const doneTasks = state.tasks.filter((t) => t.status === 'done').length;
   const lastBackup = state.settings.lastBackup || '';
@@ -2222,8 +2509,8 @@ function renderSettings() {
         <div class="settings-item-left">
           <span class="settings-item-icon">⏰</span>
           <div>
-            <div class="settings-item-label">每日复盘提醒</div>
-            <div class="settings-item-desc">每天固定时间提醒你复盘</div>
+            <div class="settings-item-label">复盘提醒</div>
+            <div class="settings-item-desc">${reviewPeriodDesc}</div>
           </div>
         </div>
         <span class="settings-item-value">${reviewTime} ›</span>
@@ -2282,21 +2569,116 @@ function setupReminderCheck() {
   checkReviewTime();
 }
 
-function checkReviewTime() {
+// 归一化提醒日期数组（每周模式，支持多选）
+function getReviewDays() {
+  const day = state.settings.reviewDay;
+  if (Array.isArray(day)) return day;
+  if (typeof day === 'string' && day) return [day];
+  return ['5'];
+}
+
+// 单个提醒日期的展示名称
+function getReviewDayName(d) {
+  if (d === 'first-workday') return '第一个工作日';
+  if (d === 'last-workday') return '最后一个工作日';
+  return WEEKDAY_NAMES[parseInt(d, 10)];
+}
+
+// 提醒日期（每周模式）的展示名称（多选时用顿号连接）
+function getReviewDayDesc() {
+  return getReviewDays().map(getReviewDayName).join('、');
+}
+
+// 提醒日期（每周模式）的说明文字（不重复日期名称，只说明关键差异）
+function getReviewDayHint(days) {
+  const list = Array.isArray(days) ? days : getReviewDays();
+  if (list.length === 0) return '请至少选择一个提醒日期';
+  const hasWorkday = list.some((d) => d === 'first-workday' || d === 'last-workday');
+  return hasWorkday
+    ? '工作日选项会自动跳过周末和节假日'
+    : '所选日期为节假日时照常提醒';
+}
+
+// 本周一 00:00（用于按周计算提醒时刻）
+function getThisMonday() {
+  const now = new Date();
+  const day = now.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  const monday = new Date(now);
+  monday.setDate(now.getDate() + diff);
+  monday.setHours(0, 0, 0, 0);
+  return monday;
+}
+
+// 计算某一周（monday 为周一 00:00）的所有提醒时刻（按时间升序）
+function getWeekTriggers(monday) {
   const reviewTime = state.settings.reviewTime || DEFAULT_REVIEW_TIME;
   const [h, m] = reviewTime.split(':');
-  const now = new Date();
-  const target = new Date();
-  target.setHours(parseInt(h), parseInt(m), 0, 0);
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
 
-  // 在目标时间 ±1 分钟内触发
-  const diff = Math.abs(now - target);
-  if (diff < 60000) {
-    const lastReviewDate = state.settings.lastReviewDate || '';
-    const today = todayString();
-    if (lastReviewDate !== today) {
-      sendNotification();
+  return getReviewDays()
+    .map((d) => {
+      let date;
+      if (d === 'first-workday') {
+        // 本周第一个工作日（从周一向后找，复用节假日+调休表）
+        date = findFirstWorkday(monday, sunday);
+      } else if (d === 'last-workday') {
+        // 本周最后一个工作日（从周日向前回溯，复用节假日+调休表）
+        date = findLastWorkday(sunday, monday);
+      } else {
+        // 指定星期几（照常按星期提醒，不考虑节假日）
+        const weekday = parseInt(d, 10);
+        const diff = (weekday - monday.getDay() + 7) % 7;
+        date = new Date(monday);
+        date.setDate(monday.getDate() + diff);
+      }
+      date.setHours(parseInt(h), parseInt(m), 0, 0);
+      return date.getTime();
+    })
+    .sort((a, b) => a - b);
+}
+
+// 本周期所有应提醒的时刻（本周，按时间升序）
+function getReviewTriggers() {
+  return getWeekTriggers(getThisMonday());
+}
+
+// 当前提醒周期起点 = 最近一次已过的提醒时刻（跨周回溯，覆盖本周与上周）
+function getCurrentCycleStart() {
+  const now = Date.now();
+  let latest = null;
+  for (let w = 0; w < 2; w += 1) {
+    const monday = new Date(getThisMonday());
+    monday.setDate(monday.getDate() - 7 * w);
+    for (const t of getWeekTriggers(monday)) {
+      if (t <= now && (latest === null || t > latest)) latest = t;
     }
+  }
+  return latest;
+}
+
+// 当前提醒周期内是否已完成复盘（周期 = 最近一次提醒时刻之后）
+function isReviewedInCurrentCycle() {
+  const last = state.settings.lastReviewAt || 0;
+  if (!last) return false;
+  const cycleStart = getCurrentCycleStart();
+  if (!cycleStart) return false;
+  return last >= cycleStart;
+}
+
+function checkReviewTime() {
+  const triggers = getReviewTriggers();
+  const now = Date.now();
+  const lastRemindedAt = state.settings.lastRemindedAt || 0;
+  // 找最近一个“已到点且本周期未提醒过”的时刻；错过（页面未打开）则补发
+  const due = triggers
+    .filter((t) => now >= t && lastRemindedAt < t)
+    .sort((a, b) => b - a)[0];
+  if (due !== undefined) {
+    sendNotification();
+    state.settings.lastRemindedAt = due;
+    dbPut('settings', { key: 'lastRemindedAt', value: due });
   }
 }
 
@@ -2324,7 +2706,7 @@ function checkDeadlines() {
 function sendNotification() {
   if ('Notification' in window && Notification.permission === 'granted') {
     const pendingTasks = state.tasks.filter((t) => t.status !== 'done').length;
-    new Notification('📋 每日复盘提醒', {
+    new Notification('📋 复盘提醒', {
       body: pendingTasks > 0
         ? `还有 ${pendingTasks} 件事需要关注，点击开始复盘`
         : '今天的事情都做完了吗？回顾一下吧',
@@ -2337,8 +2719,8 @@ function sendNotification() {
   } else if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
     navigator.serviceWorker.controller.postMessage({
       type: 'SEND_NOTIFICATION',
-      title: '📋 每日复盘提醒',
-      body: '该进行今天的任务复盘了，回顾一下进展吧！',
+      title: '📋 复盘提醒',
+      body: '该进行任务复盘了，回顾一下进展吧！',
     });
   }
 }
@@ -2421,11 +2803,11 @@ async function initApp() {
   });
 
   // FAB 按钮
-  $('#fab-btn').addEventListener('click', async () => {
+  $('#fab-btn').addEventListener('click', () => {
+    // 同步处理复盘模式退出：保持用户手势上下文，确保移动端能弹出输入法
     if (state.reviewMode) {
-      // 复盘模式下点击新建：先结束复盘再弹出
-      await dbPut('settings', { key: 'lastReviewDate', value: todayString() });
-      await loadData();
+      state.settings.lastReviewAt = Date.now();
+      dbPut('settings', { key: 'lastReviewAt', value: Date.now() });
       state.reviewMode = false;
       state.reviewTouched.clear();
       state.currentPeriodId = getDefaultPeriodId();
@@ -2442,11 +2824,6 @@ async function initApp() {
   }, 3000);
 
   renderCurrentView();
-
-  // 打开即弹出录入框，方便快速记录
-  setTimeout(() => {
-    showAddTaskModal(state.currentPeriodId);
-  }, 300);
 }
 
 // 启动应用
