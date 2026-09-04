@@ -880,7 +880,6 @@ async function showEditTaskModal(task) {
   const deadlineMin = task.deadline
     ? new Date(task.deadline).getMinutes().toString().padStart(2, '0')
     : '30';
-  const hasTime = task.deadline && (new Date(task.deadline).getHours() !== 10 || new Date(task.deadline).getMinutes() !== 30);
 
   // 进展时间轴 HTML
   const logEntries = (task.progressLog || []).slice().reverse(); // 最新在前
@@ -949,8 +948,8 @@ async function showEditTaskModal(task) {
           <div id="edit-manual-mode" style="display:none;">
             <input class="form-input" type="date" id="edit-task-date" value="${deadlineDate}">
             <div style="margin-top:6px;display:flex;align-items:center;gap:8px;">
-              <span id="edit-time-toggle" class="time-toggle" style="font-size:12px;color:var(--color-primary);cursor:pointer;${hasTime ? 'display:none' : ''}">+ 添加具体时间</span>
-              <span id="edit-time-row" style="${hasTime ? 'display:flex' : 'display:none'};align-items:center;gap:6px;">
+              <span id="edit-time-toggle" class="time-toggle" style="font-size:12px;color:var(--color-primary);cursor:pointer;display:none;">+ 添加具体时间</span>
+              <span id="edit-time-row" style="display:flex;align-items:center;gap:6px;">
                 <input class="time-input" id="edit-task-hour" value="${deadlineHour}" maxlength="2">
                 <span class="time-separator">:</span>
                 <input class="time-input" id="edit-task-minute" value="${deadlineMin}" maxlength="2">
@@ -986,13 +985,13 @@ async function showEditTaskModal(task) {
   let editStatus = task.status;
   let editTags = [...(task.tags || [])];
 
-  // 截止日期模式：有预设时段标识则用时段模式，否则手动模式
-  let editUsingPeriod = null; // 当前选中的预估时段（null 表示手动模式）
-  let editIsManual = !task.periodId || !isPresetPeriod(task.periodId);
-  if (!editIsManual) {
+  // 截止日期模式：默认展示手动模式（精确日期时间），可切换为模糊预估；
+  // 任务原有预设时段映射保留，切换为模糊预估时恢复选中项
+  let editUsingPeriod = null;
+  if (task.periodId && isPresetPeriod(task.periodId)) {
     editUsingPeriod = mapPeriodToDeadlinePreset(task.periodId);
-    if (!editUsingPeriod) editIsManual = true;
   }
+  let editIsManual = true;
 
   // 初始状态快照（用于检测未保存的改动，不含进展记录）
   const initialState = {
@@ -1206,18 +1205,8 @@ async function showEditTaskModal(task) {
   overlay.querySelector('#edit-switch-manual').addEventListener('click', switchEditToManual);
   overlay.querySelector('#edit-reset-period').addEventListener('click', switchEditToPeriod);
 
-  // 初始化截止日期模式
-  if (editIsManual) {
-    switchEditToManual();
-  } else {
-    renderEditPeriodChips();
-    // 保留任务原有截止日期，不在打开弹窗时按当前日期重算，
-    // 避免仅修改其他字段保存后原始截止日期被静默篡改
-    const editHint = overlay.querySelector('#edit-deadline-hint');
-    if (task.deadline) {
-      editHint.textContent = `👉 当前截止 ${formatDate(task.deadline)}`;
-    }
-  }
+  // 初始化截止日期模式：始终以手动模式（精确日期时间）展示，用户可自行切换为模糊预估
+  switchEditToManual();
 
   overlay.querySelector('#edit-time-toggle')?.addEventListener('click', function () {
     this.style.display = 'none';
