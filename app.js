@@ -491,6 +491,16 @@ function todayString() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+// 解析截止时间输入框：未填写时默认 10:30；填 0 时保留 0，不落回默认值
+function parseDeadlineTime(hourVal, minuteVal) {
+  const hRaw = parseInt(hourVal, 10);
+  const mRaw = parseInt(minuteVal, 10);
+  return {
+    h: Number.isNaN(hRaw) ? 10 : hRaw,
+    m: Number.isNaN(mRaw) ? 30 : mRaw,
+  };
+}
+
 // 显示即时保存提示（复盘模式下修改即存）
 let saveIndicatorTimer = null;
 function showSaveIndicator() {
@@ -631,9 +641,9 @@ function showAddTaskModal(presetPeriodId) {
             <div style="margin-top:6px;display:flex;align-items:center;gap:8px;">
               <span id="add-time-toggle" style="font-size:12px;color:var(--color-primary);cursor:pointer;">+ 设定具体时间</span>
               <span id="add-time-row" style="display:none;align-items:center;gap:6px;">
-                <input class="time-input" id="add-task-hour" maxlength="2" value="18">
+                <input class="time-input" id="add-task-hour" maxlength="2" value="10">
                 <span class="time-separator">:</span>
-                <input class="time-input" id="add-task-minute" maxlength="2" value="00">
+                <input class="time-input" id="add-task-minute" maxlength="2" value="30">
               </span>
             </div>
             <div style="margin-top:8px;">
@@ -684,7 +694,7 @@ function showAddTaskModal(presetPeriodId) {
     if (endDate) {
       const dateStr = toDateString(endDate);
       overlay.querySelector('#add-task-date').value = dateStr;
-      hint.textContent = `👉 自动设为 ${formatDate(endDate)}（10:00）`;
+      hint.textContent = `👉 自动设为 ${formatDate(endDate)}（10:30）`;
     } else {
       overlay.querySelector('#add-task-date').value = '';
       hint.textContent = '';
@@ -804,8 +814,10 @@ function showAddTaskModal(presetPeriodId) {
     const dateStr = overlay.querySelector('#add-task-date').value;
     let deadline = null;
     if (dateStr) {
-      const h = parseInt(overlay.querySelector('#add-task-hour').value) || 18;
-      const m = parseInt(overlay.querySelector('#add-task-minute').value) || 0;
+      const { h, m } = parseDeadlineTime(
+        overlay.querySelector('#add-task-hour').value,
+        overlay.querySelector('#add-task-minute').value
+      );
       deadline = new Date(dateStr + 'T00:00:00').getTime() + h * 3600000 + m * 60000;
     }
 
@@ -864,11 +876,11 @@ async function showEditTaskModal(task) {
   const deadlineDate = toDateString(task.deadline);
   const deadlineHour = task.deadline
     ? new Date(task.deadline).getHours().toString().padStart(2, '0')
-    : '18';
+    : '10';
   const deadlineMin = task.deadline
     ? new Date(task.deadline).getMinutes().toString().padStart(2, '0')
-    : '00';
-  const hasTime = task.deadline && (new Date(task.deadline).getHours() !== 18 || new Date(task.deadline).getMinutes() !== 0);
+    : '30';
+  const hasTime = task.deadline && (new Date(task.deadline).getHours() !== 10 || new Date(task.deadline).getMinutes() !== 30);
 
   // 进展时间轴 HTML
   const logEntries = (task.progressLog || []).slice().reverse(); // 最新在前
@@ -1004,8 +1016,10 @@ async function showEditTaskModal(task) {
     const dateStr = overlay.querySelector('#edit-task-date')?.value;
     let currentDeadline = null;
     if (dateStr) {
-      const h = parseInt(overlay.querySelector('#edit-task-hour')?.value) || 18;
-      const m = parseInt(overlay.querySelector('#edit-task-minute')?.value) || 0;
+      const { h, m } = parseDeadlineTime(
+        overlay.querySelector('#edit-task-hour')?.value,
+        overlay.querySelector('#edit-task-minute')?.value
+      );
       currentDeadline = new Date(dateStr + 'T00:00:00').getTime() + h * 3600000 + m * 60000;
     }
     if (currentDeadline !== initialState.deadline) return true;
@@ -1040,8 +1054,10 @@ async function showEditTaskModal(task) {
     const dateStr = overlay.querySelector('#edit-task-date').value;
     let deadline = null;
     if (dateStr) {
-      const h = parseInt(overlay.querySelector('#edit-task-hour').value) || 18;
-      const m = parseInt(overlay.querySelector('#edit-task-minute').value) || 0;
+      const { h, m } = parseDeadlineTime(
+        overlay.querySelector('#edit-task-hour').value,
+        overlay.querySelector('#edit-task-minute').value
+      );
       deadline = new Date(dateStr + 'T00:00:00').getTime() + h * 3600000 + m * 60000;
     }
     task.name = name;
@@ -1160,7 +1176,7 @@ async function showEditTaskModal(task) {
     const hint = overlay.querySelector('#edit-deadline-hint');
     if (endDate) {
       overlay.querySelector('#edit-task-date').value = toDateString(endDate);
-      hint.textContent = `👉 自动设为 ${formatDate(endDate)}（10:00）`;
+      hint.textContent = `👉 自动设为 ${formatDate(endDate)}（10:30）`;
     } else {
       overlay.querySelector('#edit-task-date').value = '';
       hint.textContent = '';
@@ -1195,7 +1211,12 @@ async function showEditTaskModal(task) {
     switchEditToManual();
   } else {
     renderEditPeriodChips();
-    updateEditAutoDeadline();
+    // 保留任务原有截止日期，不在打开弹窗时按当前日期重算，
+    // 避免仅修改其他字段保存后原始截止日期被静默篡改
+    const editHint = overlay.querySelector('#edit-deadline-hint');
+    if (task.deadline) {
+      editHint.textContent = `👉 当前截止 ${formatDate(task.deadline)}`;
+    }
   }
 
   overlay.querySelector('#edit-time-toggle')?.addEventListener('click', function () {
@@ -1300,8 +1321,10 @@ async function showEditTaskModal(task) {
     const dateStr = overlay.querySelector('#edit-task-date').value;
     let deadline = null;
     if (dateStr) {
-      const h = parseInt(overlay.querySelector('#edit-task-hour').value) || 18;
-      const m = parseInt(overlay.querySelector('#edit-task-minute').value) || 0;
+      const { h, m } = parseDeadlineTime(
+        overlay.querySelector('#edit-task-hour').value,
+        overlay.querySelector('#edit-task-minute').value
+      );
       deadline = new Date(dateStr + 'T00:00:00').getTime() + h * 3600000 + m * 60000;
     }
 
