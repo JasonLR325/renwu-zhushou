@@ -349,6 +349,12 @@ body {
   -webkit-user-select: none;
 }
 
+/* 鼠标悬浮：轻微上浮 + 阴影加深 */
+.task-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
 /* ========== Swipe-to-Delete Wrapper ========== */
 .task-card-wrapper {
   position: relative;
@@ -556,6 +562,29 @@ body {
   color: var(--color-success);
 }
 
+/* 剩余时间标签：默认浅绿底深绿字，不足2周浅红底红字 */
+.badge-remaining {
+  display: inline-flex;
+  align-items: center;
+  background: var(--color-success-bg);
+  color: var(--color-success);
+  border-radius: 4px;
+  font-size: 11px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+.badge-remaining.urgent {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+  font-weight: 600;
+}
+/* 已逾期：红底白字，在淡红卡片背景上保持高对比 */
+.badge-remaining.overdue {
+  background: var(--color-danger);
+  color: #fff;
+  font-weight: 600;
+}
+
 .badge-status.progress {
   background: var(--color-progress-bg);
   color: var(--color-progress);
@@ -571,6 +600,11 @@ body {
 
 .badge-deadline.overdue {
   color: var(--color-danger);
+  font-weight: 600;
+}
+
+.badge-deadline.done {
+  color: var(--color-success);
   font-weight: 600;
 }
 
@@ -1369,6 +1403,17 @@ body {
   line-height: 1.4;
   word-break: break-all;
 }
+.review-task-header-left {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.review-task-header-created {
+  font-size: 11px;
+  color: var(--color-text-hint);
+}
 .review-collapse-btn {
   background: none;
   border: 1px solid var(--color-border);
@@ -1405,6 +1450,13 @@ body {
   padding: 10px 16px;
   margin-bottom: 8px;
   cursor: pointer;
+  transition: transform 0.25s ease, box-shadow var(--transition);
+}
+
+/* 复盘收起卡片：鼠标悬浮轻微上浮 + 阴影加深 */
+.review-task.collapsed:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
 }
 
 .review-task-actions {
@@ -1415,15 +1467,27 @@ body {
 
 .review-task-field {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 8px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 3px;
+  min-width: 0;
+}
+
+/* 展开详情：双列网格，紧凑排布减少纵向空间占用 */
+.review-task-details {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 10px;
+  margin-top: 4px;
+}
+
+.review-task-field-full {
+  grid-column: 1 / -1;
 }
 
 .review-task-field-label {
   font-size: 12px;
   color: var(--color-text-hint);
-  min-width: 36px;
 }
 
 .review-task-created {
@@ -1448,7 +1512,7 @@ body {
 
 .review-task-field select,
 .review-task-field input {
-  padding: 6px 10px;
+  padding: 5px 8px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   font-size: 13px;

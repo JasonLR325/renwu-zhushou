@@ -279,6 +279,14 @@ function getPresetDateRange(presetId) {
   return { start: start.getTime(), end: end.getTime() };
 }
 
+// 判断任务在给定时间段内是否应展示：
+// 任务活跃区间为 [启动日期, 截止日期]，与时间段有重叠即展示；
+// 无截止日期视为持续进行，无启动日期回退为创建日期。
+function isTaskInPeriod(task, range) {
+  const start = task.startDate || task.createdAt || 0;
+  return start <= range.end && (!task.deadline || task.deadline >= range.start);
+}
+
 function getPeriodLabel(periodId) {
   const preset = PRESET_PERIODS.find((p) => p.id === periodId);
   if (preset) return preset.name;
@@ -295,8 +303,7 @@ function countPeriodTasks(periodId) {
   if (!range) return 0;
   return state.tasks.filter((t) => {
     if (t.status === 'done') return false;
-    const ref = t.deadline || t.createdAt;
-    return ref >= range.start && ref <= range.end;
+    return isTaskInPeriod(t, range);
   }).length;
 }
 
@@ -518,6 +525,16 @@ function isOverdue(ts) {
   return Date.now() > ts;
 }
 
+// 更新任务状态并维护实际完成时间：变为已完成时记录 doneAt，回到未完成时清除
+function applyTaskStatus(task, newStatus) {
+  if (newStatus === 'done') {
+    if (task.status !== 'done' || !task.doneAt) task.doneAt = Date.now();
+  } else {
+    task.doneAt = null;
+  }
+  task.status = newStatus;
+}
+
 // 获取任务最新进展文本
 function latestProgress(task) {
   if (!task.progressLog || task.progressLog.length === 0) return '';
@@ -541,6 +558,22 @@ function getDeadlineClass(ts) {
   if (isOverdue(ts)) return 'overdue';
   if (isSoon(ts)) return 'soon';
   return '';
+}
+
+// 非已完成任务的时间标签：剩余天数（几周）不足2周标红；已逾期显示“逾期XX天”
+function renderRemainingBadge(task) {
+  if (task.status === 'done' || !task.deadline) return '';
+  const diff = task.deadline - Date.now();
+  if (diff < 0) {
+    // 已逾期：逾期天数向上取整，不足一天按1天计；红底白字以在淡红卡片上保持可见
+    const overdueDays = Math.ceil(-diff / 86400000);
+    return `<span class="badge-remaining overdue">逾期${overdueDays}天</span>`;
+  }
+  const days = Math.ceil(diff / 86400000);
+  if (days <= 0) return '';
+  const text = `剩余${days}天`;
+  const cls = days < 14 ? 'badge-remaining urgent' : 'badge-remaining';
+  return `<span class="${cls}">${text}</span>`;
 }
 
 function getPriorityWeight(priority) {
@@ -627,6 +660,12 @@ function showAddTaskModal(presetPeriodId) {
           <div class="priority-options add-priority-compact" id="add-priority-options">
             ${priorityOptions}
           </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">🚀 启动日期</label>
+          <input class="form-input" type="date" id="add-start-date" value="${todayString()}">
+          <div style="font-size:12px;color:var(--color-text-hint);margin-top:4px;">任务从该日期起视为进行中并参与时段筛选，默认今天</div>
         </div>
 
         <div class="form-group">
@@ -821,19 +860,28 @@ function showAddTaskModal(presetPeriodId) {
       deadline = new Date(dateStr + 'T00:00:00').getTime() + h * 3600000 + m * 60000;
     }
 
+    const now = Date.now();
+    const startStr = overlay.querySelector('#add-start-date').value;
+    let startDate = startStr ? new Date(startStr + 'T00:00:00').getTime() : now;
+    if (startDate && deadline && startDate > deadline) {
+      // 截止日期早于启动日期：自动将启动日期改为截止日期前24小时并提醒
+      startDate = deadline - 24 * 3600000;
+      showToast('启动日期晚于截止日期，已自动调整为截止日期前一天', 'error');
+    }
     const task = {
       id: generateId(),
       name,
       priority: selectedPriority,
       deadline,
+      startDate,
       tags: selectedTags,
       periodId: mapDeadlineToPeriod(usingPeriod),
       status: 'todo',
       progressLog: overlay.querySelector('#add-task-notes').value.trim()
-        ? [{ content: overlay.querySelector('#add-task-notes').value.trim(), timestamp: Date.now() }]
+        ? [{ content: overlay.querySelector('#add-task-notes').value.trim(), timestamp: now }]
         : [],
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
+      createdAt: now,
+      updatedAt: now,
     };
 
     await dbPut('tasks', task);
@@ -874,6 +922,7 @@ async function showEditTaskModal(task) {
     .join('');
 
   const deadlineDate = toDateString(task.deadline);
+  const startDateStr = toDateString(task.startDate || task.createdAt);
   const deadlineHour = task.deadline
     ? new Date(task.deadline).getHours().toString().padStart(2, '0')
     : '10';
@@ -939,6 +988,12 @@ async function showEditTaskModal(task) {
         </div>
 
         <div class="form-group">
+          <label class="form-label">🚀 启动日期</label>
+          <input class="form-input" type="date" id="edit-start-date" value="${startDateStr}">
+          <div style="font-size:12px;color:var(--color-text-hint);margin-top:4px;">任务从该日期起视为进行中并参与时段筛选，默认与创建日期相同</div>
+        </div>
+
+        <div class="form-group">
           <label class="form-label">⏱ 截止日期</label>
           <div id="edit-period-mode">
             <div class="period-selector" id="edit-period-chips" style="padding:0;margin-bottom:6px;"></div>
@@ -1000,6 +1055,8 @@ async function showEditTaskModal(task) {
     status: task.status,
     tags: [...(task.tags || [])].sort().join(','),
     deadline: task.deadline || null,
+    // 启动日期输入框只精确到天，用日期字符串比较避免时间精度误判
+    startDate: toDateString(task.startDate || task.createdAt),
   };
 
   // 拦截关闭（点击背景或✕按钮）
@@ -1022,6 +1079,8 @@ async function showEditTaskModal(task) {
       currentDeadline = new Date(dateStr + 'T00:00:00').getTime() + h * 3600000 + m * 60000;
     }
     if (currentDeadline !== initialState.deadline) return true;
+    const startStr = overlay.querySelector('#edit-start-date')?.value || '';
+    if (startStr !== initialState.startDate) return true;
     return false;
   }
 
@@ -1059,15 +1118,29 @@ async function showEditTaskModal(task) {
       );
       deadline = new Date(dateStr + 'T00:00:00').getTime() + h * 3600000 + m * 60000;
     }
+    const startStr = overlay.querySelector('#edit-start-date').value;
+    let startDate = null;
+    if (startStr) {
+      // 日期未改动时保留原时间戳，避免把“今天 11:53”重置为“今天 00:00”
+      startDate = startStr === toDateString(task.startDate || task.createdAt)
+        ? (task.startDate || task.createdAt)
+        : new Date(startStr + 'T00:00:00').getTime();
+    }
+    if (startDate && deadline && startDate > deadline) {
+      // 截止日期早于启动日期：自动将启动日期改为截止日期前24小时并提醒
+      startDate = deadline - 24 * 3600000;
+      showToast('启动日期晚于截止日期，已自动调整为截止日期前一天', 'error');
+    }
     task.name = name;
     task.priority = editPriority;
     task.deadline = deadline;
+    task.startDate = startDate;
     // 选中了预估时段则同步更新时段归属；手动模式保持原时段归属不变
     if (editUsingPeriod) {
       task.periodId = mapDeadlineToPeriod(editUsingPeriod);
     }
     task.tags = editTags;
-    task.status = editStatus;
+    applyTaskStatus(task, editStatus);
     task.updatedAt = Date.now();
     await dbPut('tasks', task);
     closeModal();
@@ -1253,7 +1326,7 @@ async function showEditTaskModal(task) {
     let toastMsg = '进展已记录 ✓';
     if (editStatus === 'todo') {
       editStatus = 'progress';
-      task.status = 'progress';
+      applyTaskStatus(task, 'progress');
       overlay.querySelectorAll('#edit-status-toggle .status-option').forEach((e) => {
         e.classList.toggle('selected', e.dataset.status === 'progress');
       });
@@ -1316,12 +1389,26 @@ async function showEditTaskModal(task) {
       );
       deadline = new Date(dateStr + 'T00:00:00').getTime() + h * 3600000 + m * 60000;
     }
+    const startStr = overlay.querySelector('#edit-start-date').value;
+    let startDate = null;
+    if (startStr) {
+      // 日期未改动时保留原时间戳，避免把“今天 11:53”重置为“今天 00:00”
+      startDate = startStr === toDateString(task.startDate || task.createdAt)
+        ? (task.startDate || task.createdAt)
+        : new Date(startStr + 'T00:00:00').getTime();
+    }
+    if (startDate && deadline && startDate > deadline) {
+      // 截止日期早于启动日期：自动将启动日期改为截止日期前24小时并提醒
+      startDate = deadline - 24 * 3600000;
+      showToast('启动日期晚于截止日期，已自动调整为截止日期前一天', 'error');
+    }
 
     task.name = name;
     task.priority = editPriority;
     task.deadline = deadline;
+    task.startDate = startDate;
     task.tags = editTags;
-    task.status = editStatus;
+    applyTaskStatus(task, editStatus);
     // 新进展通过 #btn-add-progress 已实时追加到 progressLog，这里不再覆盖
     task.updatedAt = Date.now();
 
@@ -1828,10 +1915,7 @@ function renderHome() {
   let periodTasks;
   const range = getPresetDateRange(state.currentPeriodId);
   if (range) {
-    periodTasks = state.tasks.filter((t) => {
-      const ref = t.deadline || t.createdAt;
-      return ref >= range.start && ref <= range.end;
-    });
+    periodTasks = state.tasks.filter((t) => isTaskInPeriod(t, range));
   } else {
     periodTasks = [...state.tasks];
   }
@@ -1892,10 +1976,7 @@ function renderHome() {
     if (periodId === 'all') return state.tasks.length;
     const range = getPresetDateRange(periodId);
     if (!range) return 0;
-    return state.tasks.filter((t) => {
-      const ref = t.deadline || t.createdAt;
-      return ref >= range.start && ref <= range.end;
-    }).length;
+    return state.tasks.filter((t) => isTaskInPeriod(t, range)).length;
   }
 
   const periodChips = sortedPresets
@@ -2120,13 +2201,16 @@ function renderTaskCard(task) {
   const deadlineText = task.deadline
     ? (task.deadline % (24 * 3600000) === 0 ? formatDate(task.deadline) : formatDateTime(task.deadline))
     : '';
-  const deadlineDisplay = deadlineText
-    ? isOverdue(task.deadline)
-      ? `<span class="badge-deadline overdue">📅 已逾期 · ${deadlineText}</span>`
-      : task.status === 'done'
-        ? `<span class="badge-deadline">📅 ${deadlineText}</span>`
+  // 已完成任务展示实际完成时间（无记录时回退为截止日期），未完成任务展示截止日期
+  const deadlineDisplay = task.status === 'done'
+    ? (task.doneAt
+        ? `<span class="badge-deadline done">完成于 ${formatDateTime(task.doneAt)}</span>`
+        : (deadlineText ? `<span class="badge-deadline">📅 ${deadlineText}</span>` : ''))
+    : (deadlineText
+      ? isOverdue(task.deadline)
+        ? `<span class="badge-deadline overdue">📅 已逾期 · ${deadlineText}</span>`
         : `<span class="badge-deadline ${deadlineClass}">📅 ${deadlineText}前需完成</span>`
-    : '';
+      : '');
   const isDone = task.status === 'done';
 
   const tagBadges = (task.tags || [])
@@ -2136,11 +2220,13 @@ function renderTaskCard(task) {
     })
     .join('');
 
+  // 已完成任务已通过“完成于 xx”表达状态，不再重复显示已完成标签
   const statusBadge = isDone
-    ? '<span class="badge badge-status">已完成</span>'
+    ? ''
     : task.status === 'progress'
       ? '<span class="badge badge-status progress">进行中</span>'
       : '';
+  const remainingBadge = renderRemainingBadge(task);
 
   const createdDisplay = task.createdAt
     ? `<div class="task-card-created">添加于${formatCreatedAt(task.createdAt)}</div>`
@@ -2157,6 +2243,7 @@ function renderTaskCard(task) {
         <div class="task-card-meta">
           <div class="task-card-meta-left">
             ${deadlineDisplay}
+            ${remainingBadge}
             ${statusBadge}
           </div>
           ${createdDisplay}
@@ -2266,7 +2353,7 @@ function bindReviewInteractions(content) {
     const statusSelect = el.querySelector('.review-status');
     if (statusSelect) {
       statusSelect.addEventListener('change', async () => {
-        task.status = statusSelect.value;
+        applyTaskStatus(task, statusSelect.value);
         task.updatedAt = Date.now();
         state.reviewTouched.add(task.id);
         await dbPut('tasks', task);
@@ -2297,6 +2384,35 @@ function bindReviewInteractions(content) {
           const parts = dateInput.value.split('-');
           const d = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
           task.deadline = d.getTime();
+          // 截止日期早于启动日期：自动将启动日期改为截止日期前24小时并提醒
+          if (task.startDate && task.startDate > task.deadline) {
+            task.startDate = task.deadline - 24 * 3600000;
+            showToast('截止日期早于启动日期，启动日期已自动调整为截止日期前一天', 'error');
+          }
+        }
+        state.reviewTouched.add(task.id);
+        task.updatedAt = Date.now();
+        await dbPut('tasks', task);
+        await loadData();
+        renderHome();
+        showSaveIndicator();
+      });
+    }
+
+    const startInput = el.querySelector('.review-start');
+    if (startInput) {
+      startInput.addEventListener('change', async () => {
+        if (startInput.value) {
+          // 用本地时间构造，与显示格式保持一致，避免时区偏移导致日期差一天
+          const parts = startInput.value.split('-');
+          const d = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+          if (task.deadline && d.getTime() > task.deadline) {
+            // 启动日期晚于截止日期：自动改为截止日期前24小时并提醒
+            task.startDate = task.deadline - 24 * 3600000;
+            showToast('启动日期晚于截止日期，已自动调整为截止日期前一天', 'error');
+          } else {
+            task.startDate = d.getTime();
+          }
         }
         state.reviewTouched.add(task.id);
         task.updatedAt = Date.now();
@@ -2382,23 +2498,28 @@ function renderReviewTask(task) {
   const isDone = task.status === 'done';
   const isCollapsed = state.reviewCollapsed.has(task.id);
   const deadlineDate = toDateString(task.deadline);
+  const startDateStr = toDateString(task.startDate || task.createdAt);
   const deadlineClass = getDeadlineClass(task.deadline);
   const deadlineText = task.deadline
     ? (task.deadline % (24 * 3600000) === 0 ? formatDate(task.deadline) : formatDateTime(task.deadline))
     : '';
-  const deadlineDisplay = deadlineText
-    ? isOverdue(task.deadline)
-      ? `<span class="badge-deadline overdue">📅 已逾期 · ${deadlineText}</span>`
-      : isDone
-        ? `<span class="badge-deadline">📅 ${deadlineText}</span>`
+  // 已完成任务展示实际完成时间（无记录时回退为截止日期），未完成任务展示截止日期
+  const deadlineDisplay = isDone
+    ? (task.doneAt
+        ? `<span class="badge-deadline done">完成于 ${formatDateTime(task.doneAt)}</span>`
+        : (deadlineText ? `<span class="badge-deadline">📅 ${deadlineText}</span>` : ''))
+    : (deadlineText
+      ? isOverdue(task.deadline)
+        ? `<span class="badge-deadline overdue">📅 已逾期 · ${deadlineText}</span>`
         : `<span class="badge-deadline ${deadlineClass}">📅 ${deadlineText}前需完成</span>`
-    : '';
+      : '');
 
   const statusBadge = isDone
     ? '<span class="badge badge-status">已完成</span>'
     : task.status === 'progress'
       ? '<span class="badge badge-status progress">进行中</span>'
       : '';
+  const remainingBadge = renderRemainingBadge(task);
 
   const priorityOptions = PRIORITY_ORDER.map(
     (key) =>
@@ -2413,12 +2534,16 @@ function renderReviewTask(task) {
   return `
     <div class="review-task priority-${task.priority}${isDone ? ' done' : ''}${isCollapsed ? ' collapsed' : ''}" data-task-id="${task.id}">
       <div class="review-task-header">
-        <span class="review-task-name-text">${escapeHtml(task.name)}</span>
+        <div class="review-task-header-left">
+          <span class="review-task-name-text">${escapeHtml(task.name)}</span>
+          ${createdText ? `<span class="review-task-header-created">添加于${createdText}</span>` : ''}
+        </div>
         ${isCollapsed ? '' : '<button class="review-collapse-btn">收起</button>'}
       </div>
 
       <div class="review-task-compact"${isCollapsed ? '' : ' style="display:none;"'}>
         ${deadlineDisplay}
+        ${remainingBadge}
         ${statusBadge}
         <span class="priority-dot priority-dot-${task.priority}"></span>
         ${createdBadge}
@@ -2426,7 +2551,7 @@ function renderReviewTask(task) {
 
       <div class="review-task-details"${isCollapsed ? ' style="display:none;"' : ''}>
         <div class="review-task-field">
-          <span class="review-task-field-label">状态</span>
+          <span class="review-task-field-label">任务状态</span>
           <select class="review-status">
             <option value="todo"${task.status === 'todo' ? ' selected' : ''}>待办</option>
             <option value="progress"${task.status === 'progress' ? ' selected' : ''}>进行中</option>
@@ -2435,25 +2560,27 @@ function renderReviewTask(task) {
         </div>
 
         <div class="review-task-field">
-          <span class="review-task-field-label">优先级</span>
+          <span class="review-task-field-label">任务优先级</span>
           <select class="review-priority">${priorityOptions}</select>
         </div>
 
         <div class="review-task-field">
-          <span class="review-task-field-label">截止</span>
-          <input type="date" class="review-deadline" value="${deadlineDate}" style="flex:1;" onfocus="this.showPicker()">
+          <span class="review-task-field-label">启动日期</span>
+          <input type="date" class="review-start" value="${startDateStr}" onfocus="this.showPicker()">
         </div>
 
         <div class="review-task-field">
-          <span class="review-task-field-label">进展</span>
-          <input type="text" class="review-progress" value="" placeholder="${latestProgress(task) ? '上次：' + latestProgress(task).slice(0, 20) : '记录新进展...'}" style="flex:1;">
-          <button class="review-progress-save" style="display:none;">保存</button>
+          <span class="review-task-field-label">截止日期</span>
+          <input type="date" class="review-deadline" value="${deadlineDate}" onfocus="this.showPicker()">
         </div>
 
-        ${createdText ? `<div class="review-task-field">
-          <span class="review-task-field-label">添加</span>
-          <span class="review-task-created">${createdText}</span>
-        </div>` : ''}
+        <div class="review-task-field review-task-field-full">
+          <span class="review-task-field-label">当前进展</span>
+          <div style="display:flex;gap:6px;">
+            <input type="text" class="review-progress" value="" placeholder="${latestProgress(task) ? '上次：' + latestProgress(task).slice(0, 20) : '记录新进展...'}" style="flex:1;">
+            <button class="review-progress-save" style="display:none;">保存</button>
+          </div>
+        </div>
       </div>
     </div>`;
 }
